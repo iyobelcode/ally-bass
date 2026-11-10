@@ -29,7 +29,7 @@ juce_add_plugin(AllyBass
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE JUnc
     PLUGIN_CODE AlBa
-    FORMATS VST3 AU Standalone
+    FORMATS VST3 $<$<PLATFORM_ID:Darwin>:AU> Standalone
     PRODUCT_NAME "ALLY BASS"
     BUNDLE_ID "com.juicedunicorn.allybass"
 )
