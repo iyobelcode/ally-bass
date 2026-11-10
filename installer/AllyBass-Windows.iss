@@ -12,6 +12,7 @@
 #define VST3Dir    "staging\ALLY BASS.vst3"
 
 [Setup]
+SourceDir=.
 AppId={{8F3A1C2D-4B5E-6F7A-8B9C-0D1E2F3A4B5C}
 AppName={#AppName}
 AppVersion={#AppVersion}
@@ -58,7 +59,7 @@ WelcomeLabel2=ALLY BASS is een grensverleggende VST3 Bassline Synthesizer gebouw
 ; ── Files ─────────────────────────────────────────────────────────────────
 [Files]
 ; The VST3 bundle (a directory on Windows) → installs to Common Files\VST3\
-Source: "..\{#VST3Dir}\*"; DestDir: "{commonpf64}\Common Files\VST3\ALLY BASS.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#VST3Dir}\*"; DestDir: "{commonpf64}\Common Files\VST3\ALLY BASS.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; ── Registry ──────────────────────────────────────────────────────────────
 [Registry]
