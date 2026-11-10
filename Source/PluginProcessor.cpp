@@ -70,8 +70,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout AllyBassAudioProcessor::crea
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"attack", 1},
         "ATTACK",
-        juce::NormalisableRange<float>(0.2f, 300.0f, 0.1f, 0.35f),
-        5.0f,
+        juce::NormalisableRange<float>(1.0f, 300.0f, 0.1f, 0.35f),
+        8.0f,
         juce::AudioParameterFloatAttributes().withLabel("ms")));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -204,12 +204,12 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
 
         targetVelocity = vel;
 
-        // Start attack ramp from current level towards velocity (zero jump = zero click)
+        // Smooth de attack om klikjes te elimineren (minimaal 5ms overgang naar doelvolume)
         envState = EnvelopeState::Attack;
         double sr = getSampleRate();
-        float attackSec = juce::jmax(0.0002f, attackMs * 0.001f);
+        float attackSec = juce::jmax(0.005f, attackMs * 0.001f);
         float attackSamples = attackSec * static_cast<float>(sr);
-        attackRate = juce::jmax(0.0001f, (targetVelocity - envLevel) / attackSamples);
+        attackRate = juce::jmax(0.00001f, (targetVelocity - envLevel) / attackSamples);
 
         // Only trigger transient if punchAmount is dialed in
         if (punchAmount > 0.01f)

@@ -71,8 +71,9 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     setupPresets();
 
     // 7. Interactive Keyboard Component
-    keyboardComponent.setAvailableRange(24, 60); // C1 to C4 - sub bass sweetspot
-    keyboardComponent.setKeyWidth(24.0f);
+    keyboardComponent.setAvailableRange(12, 84); // C0 tot C6 (breed bereik)
+    keyboardComponent.setKeyWidth(20.0f);
+    keyboardComponent.setScrollButtonsVisible(false);
     keyboardComponent.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xff22252a));
     keyboardComponent.setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xff101214));
     keyboardComponent.setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
@@ -80,6 +81,31 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     keyboardComponent.setColour(juce::MidiKeyboardComponent::upDownButtonBackgroundColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
     keyboardComponent.setColour(juce::MidiKeyboardComponent::upDownButtonArrowColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
     addAndMakeVisible(keyboardComponent);
+
+    // Octave controls
+    lblOctave.setText("OCT: C2", juce::dontSendNotification);
+    lblOctave.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::bold));
+    lblOctave.setColour(juce::Label::textColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
+    lblOctave.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(lblOctave);
+
+    btnOctaveDown.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
+    btnOctaveDown.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
+    btnOctaveDown.onClick = [this]() {
+        currentOctave = juce::jmax(0, currentOctave - 1);
+        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+        repaint();
+    };
+    addAndMakeVisible(btnOctaveDown);
+
+    btnOctaveUp.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
+    btnOctaveUp.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
+    btnOctaveUp.onClick = [this]() {
+        currentOctave = juce::jmin(5, currentOctave + 1);
+        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+        repaint();
+    };
+    addAndMakeVisible(btnOctaveUp);
 
     // Request keyboard focus for QWERTY musical typing
     setWantsKeyboardFocus(true);
@@ -100,13 +126,15 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     // Octave Shift: Z / X
     if (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z')
     {
-        currentOctave = juce::jmax(1, currentOctave - 1);
+        currentOctave = juce::jmax(0, currentOctave - 1);
+        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
         repaint();
         return true;
     }
     if (key.getKeyCode() == 'X' || key.getKeyCode() == 'x')
     {
-        currentOctave = juce::jmin(4, currentOctave + 1);
+        currentOctave = juce::jmin(5, currentOctave + 1);
+        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
         repaint();
         return true;
     }
@@ -141,8 +169,6 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
         { 'P', 15 }  // D# (+1)
     };
 
-    int baseMidiNote = (currentOctave + 1) * 12; // e.g. Octave 2 -> C2 (36)
-
     for (const auto& k : map)
     {
         bool down = juce::KeyPress::isKeyCurrentlyDown(k.keyCode) ||
@@ -153,7 +179,7 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
 
         if (down && !wasDown)
         {
-            int note = baseMidiNote + k.noteOffset;
+            int note = (currentOctave + 1) * 12 + k.noteOffset;
             activeNotesByKey[k.keyCode] = note;
             audioProcessor.getKeyboardState().noteOn(1, note, 0.9f);
         }
@@ -162,6 +188,25 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
             int note = it->second;
             audioProcessor.getKeyboardState().noteOff(1, note, 0.0f);
             activeNotesByKey.erase(it);
+        }
+    }
+
+    // Veiligheid: als geen enkele toets meer ingedrukt is maar er staan nog actieve keys in de map, stop ze
+    if (activeNotesByKey.empty() == false)
+    {
+        for (auto it = activeNotesByKey.begin(); it != activeNotesByKey.end(); )
+        {
+            bool down = juce::KeyPress::isKeyCurrentlyDown(it->first) ||
+                        juce::KeyPress::isKeyCurrentlyDown(std::tolower(it->first));
+            if (!down)
+            {
+                audioProcessor.getKeyboardState().noteOff(1, it->second, 0.0f);
+                it = activeNotesByKey.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
         }
     }
 
@@ -256,9 +301,15 @@ void AllyBassAudioProcessorEditor::resized()
     // Footer area (30px)
     area.removeFromBottom(30);
 
-    // Bottom Keyboard area (58px)
-    auto keyboardArea = area.removeFromBottom(58).reduced(14, 2);
-    keyboardComponent.setBounds(keyboardArea);
+    // Bottom Keyboard area (58px) verdeeld over de volledige breedte met octaaf controls
+    auto keyboardRow = area.removeFromBottom(58).reduced(14, 2);
+    auto octArea = keyboardRow.removeFromLeft(100);
+    btnOctaveDown.setBounds(octArea.getX(), octArea.getY() + 14, 26, 28);
+    lblOctave.setBounds(octArea.getX() + 28, octArea.getY() + 14, 44, 28);
+    btnOctaveUp.setBounds(octArea.getX() + 74, octArea.getY() + 14, 26, 28);
+
+    keyboardRow.removeFromLeft(8); // kleine marge
+    keyboardComponent.setBounds(keyboardRow);
 
     // Middle Visualizer Area (~140px)
     auto visualizerArea = area.removeFromTop(140).reduced(14, 4);

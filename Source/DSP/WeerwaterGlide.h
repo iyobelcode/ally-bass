@@ -47,7 +47,7 @@ public:
             isNoteActive = true;
             isLegato = false;
             triggerTransient = true;
-            resetPhase = true;
+            resetPhase = false; // Voorkom harde fasereset (klikje)
         }
         else
         {

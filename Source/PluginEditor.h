@@ -33,6 +33,11 @@ private:
     int currentOctave = 2; // C2 = 36 (optimal 808 root)
     std::map<int, int> activeNotesByKey;
 
+    // Octaaf knoppen
+    juce::TextButton btnOctaveDown { "-" };
+    juce::TextButton btnOctaveUp { "+" };
+    juce::Label lblOctave;
+
     // The 5 Big Primary Knobs
     std::unique_ptr<AllyGUI::HeavyKnob> knobDiepte;
     std::unique_ptr<AllyGUI::HeavyKnob> knobPolderPunch;
