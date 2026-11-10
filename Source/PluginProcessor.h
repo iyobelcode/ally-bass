@@ -69,12 +69,11 @@ private:
     // Low-pass filter to tame harsh highs
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> masterLowPass;
 
-    // Click-Free Envelope Generator (Attack - Decay - Release)
-    enum class EnvelopeState { Idle, Attack, Decay, Release };
+    // Click-Free Envelope Generator (Attack - Sustain - Release)
+    enum class EnvelopeState { Idle, Attack, Sustain, Release };
     EnvelopeState envState = EnvelopeState::Idle;
     float envLevel = 0.0f;
     float attackRate = 0.0f;
-    float decayRate = 0.999f;
     float releaseRate = 0.999f;
     float targetVelocity = 1.0f;
 
@@ -84,7 +83,7 @@ private:
     std::atomic<float> currentSubLevel { 0.0f };
 
     void handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount);
-    void updateEnvelopeRates(float attackMs, float vervalSeconds, float releaseMs);
+    void updateEnvelopeRates(float attackMs, float releaseMs);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AllyBassAudioProcessor)
 };

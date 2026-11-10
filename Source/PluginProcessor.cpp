@@ -42,31 +42,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout AllyBassAudioProcessor::crea
         0.00f,
         juce::AudioParameterFloatAttributes().withLabel("Knock")));
 
-    // 3. ATTACK (Aanslag / Fade-in)
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"attack", 1},
-        "ATTACK",
-        juce::NormalisableRange<float>(0.2f, 300.0f, 0.1f, 0.35f),
-        5.0f,
-        juce::AudioParameterFloatAttributes().withLabel("ms")));
-
-    // 4. VERVAL (Decay / Sustain)
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"verval", 1},
-        "VERVAL",
-        juce::NormalisableRange<float>(0.05f, 5.0f, 0.01f, 0.40f),
-        1.40f,
-        juce::AudioParameterFloatAttributes().withLabel("s")));
-
-    // 5. RELEASE (Loslaat / Tail Fade)
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"release", 1},
-        "RELEASE",
-        juce::NormalisableRange<float>(10.0f, 2000.0f, 1.0f, 0.35f),
-        150.0f,
-        juce::AudioParameterFloatAttributes().withLabel("ms")));
-
-    // 6. HAVEN DIRT (Drive / Harmonics)
+    // 3. HAVEN DIRT (Drive / Harmonics)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"havenDirt", 1},
         "HAVEN DIRT",
@@ -74,7 +50,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout AllyBassAudioProcessor::crea
         0.15f,
         juce::AudioParameterFloatAttributes().withLabel("Drive")));
 
-    // 7. WEERWATER GLIDE (Portamento Time)
+    // 4. WEERWATER GLIDE (Portamento Time)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"weerwaterGlide", 1},
         "WEERWATER GLIDE",
@@ -82,7 +58,30 @@ juce::AudioProcessorValueTreeState::ParameterLayout AllyBassAudioProcessor::crea
         40.0f,
         juce::AudioParameterFloatAttributes().withLabel("ms")));
 
-    // 8. STADSDEEL (4-Way DSP Mode: Haven 1350, Centrum 1315, Poort 1363, Buiten 1330)
+    // 5. MASTER OUTPUT LEVEL
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"masterVolume", 1},
+        "OUTPUT",
+        juce::NormalisableRange<float>(-24.0f, 6.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    // Mini Controls: ATTACK & RELEASE
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"attack", 1},
+        "ATTACK",
+        juce::NormalisableRange<float>(0.2f, 300.0f, 0.1f, 0.35f),
+        5.0f,
+        juce::AudioParameterFloatAttributes().withLabel("ms")));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"release", 1},
+        "RELEASE",
+        juce::NormalisableRange<float>(10.0f, 3000.0f, 1.0f, 0.35f),
+        250.0f,
+        juce::AudioParameterFloatAttributes().withLabel("ms")));
+
+    // 4-Way DSP Mode: Haven 1350, Centrum 1315, Poort 1363, Buiten 1330
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"stadsdeel", 1},
         "STADSDEEL",
@@ -100,14 +99,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout AllyBassAudioProcessor::crea
         juce::ParameterID{"monoLock1300", 1},
         "1300 MONO LOCK",
         true));
-
-    // Master Output Level
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"masterVolume", 1},
-        "MASTER VOL",
-        juce::NormalisableRange<float>(-24.0f, 6.0f, 0.1f),
-        0.0f,
-        juce::AudioParameterFloatAttributes().withLabel("dB")));
 
     return { params.begin(), params.end() };
 }
@@ -185,7 +176,7 @@ bool AllyBassAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) 
     return true;
 }
 
-void AllyBassAudioProcessor::updateEnvelopeRates(float attackMs, float vervalSeconds, float releaseMs)
+void AllyBassAudioProcessor::updateEnvelopeRates(float attackMs, float releaseMs)
 {
     double sr = getSampleRate();
     if (sr <= 0.0) return;
@@ -197,11 +188,7 @@ void AllyBassAudioProcessor::updateEnvelopeRates(float attackMs, float vervalSec
     float attackSamples = attackSec * sampleRateFloat;
     attackRate = 1.0f / attackSamples;
 
-    // Decay rate: drops to ~1% (-40 dB) in vervalSeconds
-    float decaySamples = juce::jmax(1.0f, vervalSeconds * sampleRateFloat);
-    decayRate = std::exp(-4.605f / decaySamples);
-
-    // Release rate: drops to ~1% in releaseMs
+    // Release rate: drops to ~1% (-40 dB) in releaseMs
     float releaseSec = juce::jmax(0.005f, releaseMs * 0.001f);
     float releaseSamples = releaseSec * sampleRateFloat;
     releaseRate = std::exp(-4.605f / releaseSamples);
@@ -217,7 +204,7 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
 
         targetVelocity = vel;
 
-        // Start attack ramp from current level towards velocity (zero audio jump = zero click)
+        // Start attack ramp from current level towards velocity (zero jump = zero click)
         envState = EnvelopeState::Attack;
         double sr = getSampleRate();
         float attackSec = juce::jmax(0.0002f, attackMs * 0.001f);
@@ -262,18 +249,18 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     // Fetch parameter values
     const float diepte = apvts.getRawParameterValue("diepte")->load();
     const float polderPunch = apvts.getRawParameterValue("polderPunch")->load();
-    const float attackMs = apvts.getRawParameterValue("attack")->load();
-    const float verval = apvts.getRawParameterValue("verval")->load();
-    const float releaseMs = apvts.getRawParameterValue("release")->load();
     const float havenDirt = apvts.getRawParameterValue("havenDirt")->load();
     const float weerwaterGlideMs = apvts.getRawParameterValue("weerwaterGlide")->load();
-    const int stadsdeelIndex = static_cast<int>(apvts.getRawParameterValue("stadsdeel")->load());
-    const bool isOverdrive = apvts.getRawParameterValue("overdrive036")->load() > 0.5f;
-    const bool isMonoLock = apvts.getRawParameterValue("monoLock1300")->load() > 0.5f;
     const float masterVolDb = apvts.getRawParameterValue("masterVolume")->load();
     const float masterGain = juce::Decibels::decibelsToGain(masterVolDb);
 
-    updateEnvelopeRates(attackMs, verval, releaseMs);
+    const float attackMs = apvts.getRawParameterValue("attack")->load();
+    const float releaseMs = apvts.getRawParameterValue("release")->load();
+    const int stadsdeelIndex = static_cast<int>(apvts.getRawParameterValue("stadsdeel")->load());
+    const bool isOverdrive = apvts.getRawParameterValue("overdrive036")->load() > 0.5f;
+    const bool isMonoLock = apvts.getRawParameterValue("monoLock1300")->load() > 0.5f;
+
+    updateEnvelopeRates(attackMs, releaseMs);
     weerwaterGlide.updateGlideCoeff(weerwaterGlideMs, weerwaterGlide.getCurrentVelocity());
 
     auto* leftOut = buffer.getWritePointer(0);
@@ -297,7 +284,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         if (weerwaterGlide.popPhaseReset())
             napSubOsc.resetNapLock();
 
-        // Advance Envelope State Machine
+        // Advance Envelope State Machine (Attack -> Sustain -> Release)
         switch (envState)
         {
             case EnvelopeState::Idle:
@@ -309,17 +296,12 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
                 if (envLevel >= targetVelocity)
                 {
                     envLevel = targetVelocity;
-                    envState = EnvelopeState::Decay;
+                    envState = EnvelopeState::Sustain;
                 }
                 break;
 
-            case EnvelopeState::Decay:
-                envLevel *= decayRate;
-                if (envLevel < 0.0001f)
-                {
-                    envLevel = 0.0f;
-                    envState = EnvelopeState::Idle;
-                }
+            case EnvelopeState::Sustain:
+                envLevel = targetVelocity;
                 break;
 
             case EnvelopeState::Release:

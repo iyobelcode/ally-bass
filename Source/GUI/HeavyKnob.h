@@ -10,8 +10,8 @@ class HeavyKnob : public juce::Component
 {
 public:
     HeavyKnob(const juce::String& title, const juce::String& paramId, juce::AudioProcessorValueTreeState& apvts,
-              const juce::String& suffix = "", bool isRedTheme = false)
-        : titleText(title), unitSuffix(suffix)
+              const juce::String& suffix = "", bool isRedTheme = false, bool compact = false)
+        : titleText(title), unitSuffix(suffix), isCompact(compact)
     {
         slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         slider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
@@ -29,25 +29,31 @@ public:
     {
         auto area = getLocalBounds();
 
-        // Title at the top
-        titleArea = area.removeFromTop(18);
-
-        // Value text at the bottom
-        valueArea = area.removeFromBottom(16);
-
-        // Knob fills middle
-        slider.setBounds(area.reduced(2));
+        if (isCompact)
+        {
+            titleArea = area.removeFromTop(14);
+            valueArea = area.removeFromBottom(13);
+            slider.setBounds(area.reduced(1));
+        }
+        else
+        {
+            titleArea = area.removeFromTop(18);
+            valueArea = area.removeFromBottom(16);
+            slider.setBounds(area.reduced(2));
+        }
     }
 
     void paint(juce::Graphics& g) override
     {
         // 1. Draw Title
-        g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 11.5f, juce::Font::bold));
+        float titleFontSize = isCompact ? 9.5f : 11.5f;
+        g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), titleFontSize, juce::Font::bold));
         g.setColour(BrutalistLookAndFeel::industrialText);
         g.drawFittedText(titleText, titleArea, juce::Justification::centred, 1);
 
         // 2. Draw Value
-        g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 10.5f, juce::Font::plain));
+        float valFontSize = isCompact ? 8.5f : 10.5f;
+        g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), valFontSize, juce::Font::plain));
         g.setColour(BrutalistLookAndFeel::weerwaterTeal);
         g.drawFittedText(currentValueString, valueArea, juce::Justification::centred, 1);
     }
@@ -73,6 +79,7 @@ private:
     juce::String titleText;
     juce::String unitSuffix;
     juce::String currentValueString;
+    bool isCompact = false;
 
     juce::Rectangle<int> titleArea;
     juce::Rectangle<int> valueArea;

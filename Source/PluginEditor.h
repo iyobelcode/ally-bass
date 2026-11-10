@@ -33,15 +33,16 @@ private:
     int currentOctave = 2; // C2 = 36 (optimal 808 root)
     std::map<int, int> activeNotesByKey;
 
-    // The Knobs
+    // The 5 Big Primary Knobs
     std::unique_ptr<AllyGUI::HeavyKnob> knobDiepte;
     std::unique_ptr<AllyGUI::HeavyKnob> knobPolderPunch;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobAttack;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobVerval;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobRelease;
     std::unique_ptr<AllyGUI::HeavyKnob> knobHavenDirt;
     std::unique_ptr<AllyGUI::HeavyKnob> knobWeerwaterGlide;
     std::unique_ptr<AllyGUI::HeavyKnob> knobMasterVol;
+
+    // The 2 Compact Knobs (Attack & Release)
+    std::unique_ptr<AllyGUI::HeavyKnob> knobAttack;
+    std::unique_ptr<AllyGUI::HeavyKnob> knobRelease;
 
     // Stadsdeel Mode Selector
     juce::Label stadsdeelLabel;

@@ -12,42 +12,39 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     // 1. Central Visualizer
     addAndMakeVisible(visualizer);
 
-    // 2. The Knobs
+    // 2. The 5 Big Primary Knobs
     knobDiepte = std::make_unique<AllyGUI::HeavyKnob>(
-        "DIEPTE", "diepte", audioProcessor.apvts, "NAP", false);
+        "DIEPTE", "diepte", audioProcessor.apvts, "NAP", false, false);
     addAndMakeVisible(*knobDiepte);
 
     knobPolderPunch = std::make_unique<AllyGUI::HeavyKnob>(
-        "POLDER PUNCH", "polderPunch", audioProcessor.apvts, "%", true);
+        "POLDER PUNCH", "polderPunch", audioProcessor.apvts, "%", true, false);
     addAndMakeVisible(*knobPolderPunch);
 
-    knobAttack = std::make_unique<AllyGUI::HeavyKnob>(
-        "ATTACK", "attack", audioProcessor.apvts, "ms", false);
-    addAndMakeVisible(*knobAttack);
-
-    knobVerval = std::make_unique<AllyGUI::HeavyKnob>(
-        "VERVAL", "verval", audioProcessor.apvts, "s", false);
-    addAndMakeVisible(*knobVerval);
-
-    knobRelease = std::make_unique<AllyGUI::HeavyKnob>(
-        "RELEASE", "release", audioProcessor.apvts, "ms", false);
-    addAndMakeVisible(*knobRelease);
-
     knobHavenDirt = std::make_unique<AllyGUI::HeavyKnob>(
-        "HAVEN DIRT", "havenDirt", audioProcessor.apvts, "DIRT", true);
+        "HAVEN DIRT", "havenDirt", audioProcessor.apvts, "DIRT", true, false);
     addAndMakeVisible(*knobHavenDirt);
 
     knobWeerwaterGlide = std::make_unique<AllyGUI::HeavyKnob>(
-        "WEERWATER GLIDE", "weerwaterGlide", audioProcessor.apvts, "ms", false);
+        "WEERWATER GLIDE", "weerwaterGlide", audioProcessor.apvts, "ms", false, false);
     addAndMakeVisible(*knobWeerwaterGlide);
 
     knobMasterVol = std::make_unique<AllyGUI::HeavyKnob>(
-        "OUTPUT", "masterVolume", audioProcessor.apvts, "dB", false);
+        "OUTPUT", "masterVolume", audioProcessor.apvts, "dB", false, false);
     addAndMakeVisible(*knobMasterVol);
 
-    // 3. Stadsdeel Mode Selector
+    // 3. The 2 Compact Knobs (Attack & Release) placed outside the main big row
+    knobAttack = std::make_unique<AllyGUI::HeavyKnob>(
+        "ATTACK", "attack", audioProcessor.apvts, "ms", false, true);
+    addAndMakeVisible(*knobAttack);
+
+    knobRelease = std::make_unique<AllyGUI::HeavyKnob>(
+        "RELEASE", "release", audioProcessor.apvts, "ms", false, true);
+    addAndMakeVisible(*knobRelease);
+
+    // 4. Stadsdeel Mode Selector
     stadsdeelLabel.setText("STADSDEEL DSP", juce::dontSendNotification);
-    stadsdeelLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::bold));
+    stadsdeelLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 10.5f, juce::Font::bold));
     stadsdeelLabel.setColour(juce::Label::textColourId, AllyGUI::BrutalistLookAndFeel::industrialText);
     stadsdeelLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(stadsdeelLabel);
@@ -61,7 +58,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     stadsdeelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.apvts, "stadsdeel", stadsdeelBox);
 
-    // 4. Two Master Switches
+    // 5. Two Master Switches
     toggleOverdrive036 = std::make_unique<AllyGUI::BrutalistToggle>(
         "036 OVERDRIVE", "overdrive036", audioProcessor.apvts, true);
     addAndMakeVisible(*toggleOverdrive036);
@@ -70,10 +67,10 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
         "1300 MONO LOCK", "monoLock1300", audioProcessor.apvts, false);
     addAndMakeVisible(*toggleMonoLock1300);
 
-    // 5. Preset Bar
+    // 6. Preset Bar
     setupPresets();
 
-    // 6. Interactive Keyboard Component
+    // 7. Interactive Keyboard Component
     keyboardComponent.setAvailableRange(24, 60); // C1 to C4 - sub bass sweetspot
     keyboardComponent.setKeyWidth(24.0f);
     keyboardComponent.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xff22252a));
@@ -120,7 +117,6 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
 {
     juce::ignoreUnused(isKeyDown);
 
-    // Standard QWERTY musical typing mapping
     struct KeyMapping {
         int keyCode;
         int noteOffset;
@@ -260,7 +256,7 @@ void AllyBassAudioProcessorEditor::resized()
     // Footer area (30px)
     area.removeFromBottom(30);
 
-    // Bottom Keyboard area (56px)
+    // Bottom Keyboard area (58px)
     auto keyboardArea = area.removeFromBottom(58).reduced(14, 2);
     keyboardComponent.setBounds(keyboardArea);
 
@@ -271,30 +267,44 @@ void AllyBassAudioProcessorEditor::resized()
     // Controls Section
     auto controlsArea = area.reduced(14, 4);
 
-    // Sub-row for Stadsdeel Selector & 2 Master Switches
-    auto bottomRow = controlsArea.removeFromBottom(50);
-    int switchWidth = 165;
-    int spacing = 12;
+    // 1. Bottom Sub-Row for:
+    // [ STADSDEEL SELECTOR ] [ ATTACK (mini) ] [ RELEASE (mini) ] [ 036 OVERDRIVE ] [ 1300 MONO LOCK ]
+    auto bottomRow = controlsArea.removeFromBottom(56);
 
-    int totalBottomWidth = 240 + switchWidth * 2 + spacing * 2;
-    int startBottomX = (controlsArea.getWidth() - totalBottomWidth) / 2 + controlsArea.getX();
+    int stadsdeelWidth = 190;
+    int miniKnobWidth = 58;
+    int switchWidth = 145;
+    int gap = 10;
 
-    stadsdeelLabel.setBounds(startBottomX, bottomRow.getY(), 230, 16);
-    stadsdeelBox.setBounds(startBottomX, bottomRow.getY() + 18, 230, 26);
+    int totalBottomWidth = stadsdeelWidth + gap + (miniKnobWidth * 2 + 4) + gap + (switchWidth * 2 + gap);
+    int startX = controlsArea.getX() + (controlsArea.getWidth() - totalBottomWidth) / 2;
 
-    toggleOverdrive036->setBounds(startBottomX + 240 + spacing, bottomRow.getY() + 18, switchWidth, 26);
-    toggleMonoLock1300->setBounds(startBottomX + 240 + switchWidth + spacing * 2, bottomRow.getY() + 18, switchWidth, 26);
+    // Stadsdeel
+    stadsdeelLabel.setBounds(startX, bottomRow.getY() + 2, stadsdeelWidth, 14);
+    stadsdeelBox.setBounds(startX, bottomRow.getY() + 18, stadsdeelWidth, 28);
+    startX += stadsdeelWidth + gap;
 
-    // Top Knobs Row (8 knobs: DIEPTE, PUNCH, ATTACK, VERVAL, RELEASE, DIRT, GLIDE, OUTPUT)
-    int numKnobs = 8;
-    float knobWidth = static_cast<float>(controlsArea.getWidth()) / static_cast<float>(numKnobs);
+    // Small Attack & Release Knobs
+    knobAttack->setBounds(startX, bottomRow.getY(), miniKnobWidth, bottomRow.getHeight());
+    startX += miniKnobWidth + 4;
 
-    knobDiepte->setBounds(static_cast<int>(controlsArea.getX() + 0 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
-    knobPolderPunch->setBounds(static_cast<int>(controlsArea.getX() + 1 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
-    knobAttack->setBounds(static_cast<int>(controlsArea.getX() + 2 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
-    knobVerval->setBounds(static_cast<int>(controlsArea.getX() + 3 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
-    knobRelease->setBounds(static_cast<int>(controlsArea.getX() + 4 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
-    knobHavenDirt->setBounds(static_cast<int>(controlsArea.getX() + 5 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
-    knobWeerwaterGlide->setBounds(static_cast<int>(controlsArea.getX() + 6 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
-    knobMasterVol->setBounds(static_cast<int>(controlsArea.getX() + 7 * knobWidth), controlsArea.getY(), static_cast<int>(knobWidth), controlsArea.getHeight());
+    knobRelease->setBounds(startX, bottomRow.getY(), miniKnobWidth, bottomRow.getHeight());
+    startX += miniKnobWidth + gap;
+
+    // Master Switches
+    toggleOverdrive036->setBounds(startX, bottomRow.getY() + 18, switchWidth, 28);
+    startX += switchWidth + gap;
+
+    toggleMonoLock1300->setBounds(startX, bottomRow.getY() + 18, switchWidth, 28);
+
+    // 2. Top Main Knobs Row: Exactly 5 BIG, HEAVY KNOBS
+    // [ DIEPTE ] [ POLDER PUNCH ] [ HAVEN DIRT ] [ WEERWATER GLIDE ] [ OUTPUT ]
+    int numBigKnobs = 5;
+    float bigKnobWidth = static_cast<float>(controlsArea.getWidth()) / static_cast<float>(numBigKnobs);
+
+    knobDiepte->setBounds(static_cast<int>(controlsArea.getX() + 0 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
+    knobPolderPunch->setBounds(static_cast<int>(controlsArea.getX() + 1 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
+    knobHavenDirt->setBounds(static_cast<int>(controlsArea.getX() + 2 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
+    knobWeerwaterGlide->setBounds(static_cast<int>(controlsArea.getX() + 3 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
+    knobMasterVol->setBounds(static_cast<int>(controlsArea.getX() + 4 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
 }
