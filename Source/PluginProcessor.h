@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_dsp/juce_dsp.h>
 #include "DSP/NapSubOscillator.h"
 #include "DSP/PolderTransient.h"
@@ -51,7 +52,12 @@ public:
     bool isOverdriveActive() const noexcept;
     float getCurrentSubLevel() const noexcept;
 
+    // MIDI Keyboard State (for on-screen & QWERTY computer keyboard)
+    juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
+
 private:
+    juce::MidiKeyboardState keyboardState;
+
     // DSP Modules
     AllyDSP::WeerwaterGlide weerwaterGlide;
     AllyDSP::NapSubOscillator napSubOsc;
@@ -60,22 +66,25 @@ private:
     AllyDSP::MonoLockFilter monoLockFilter;
     AllyDSP::Overdrive036 overdrive036;
 
-    // Low-pass filter to tame harsh highs if needed
+    // Low-pass filter to tame harsh highs
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> masterLowPass;
 
-    // Envelope Generator (Verval / Decay)
-    float ampEnvelope = 0.0f;
-    float decayCoeff = 0.999f;
-    float releaseCoeff = 0.99f;
-    bool isNoteHeld = false;
+    // Click-Free Envelope Generator (Attack - Decay - Release)
+    enum class EnvelopeState { Idle, Attack, Decay, Release };
+    EnvelopeState envState = EnvelopeState::Idle;
+    float envLevel = 0.0f;
+    float attackRate = 0.0f;
+    float decayRate = 0.999f;
+    float releaseRate = 0.999f;
+    float targetVelocity = 1.0f;
 
     // Visualizer Ring Buffer
     std::array<float, visualizerBufferSize> visualizerBuffer {};
     std::atomic<int> visualizerWriteIndex { 0 };
     std::atomic<float> currentSubLevel { 0.0f };
 
-    void handleMidiEvent(const juce::MidiMessage& message);
-    void updateEnvelopeDecay(float vervalSeconds);
+    void handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount);
+    void updateEnvelopeRates(float attackMs, float vervalSeconds, float releaseMs);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AllyBassAudioProcessor)
 };

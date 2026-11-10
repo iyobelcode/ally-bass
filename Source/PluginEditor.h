@@ -2,6 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
 #include "GUI/BrutalistLookAndFeel.h"
 #include "GUI/NapWaveVisualizer.h"
@@ -17,6 +18,9 @@ public:
     void paint(juce::Graphics&) override;
     void resized() override;
 
+    bool keyPressed(const juce::KeyPress& key) override;
+    bool keyStateChanged(bool isKeyDown) override;
+
 private:
     AllyBassAudioProcessor& audioProcessor;
     AllyGUI::BrutalistLookAndFeel brutalistLookAndFeel;
@@ -24,10 +28,17 @@ private:
     // Visualizer
     AllyGUI::NapWaveVisualizer visualizer;
 
-    // The 6 Primary Knobs
+    // Interactive On-Screen & Computer Keyboard
+    juce::MidiKeyboardComponent keyboardComponent;
+    int currentOctave = 2; // C2 = 36 (optimal 808 root)
+    std::map<int, int> activeNotesByKey;
+
+    // The Knobs
     std::unique_ptr<AllyGUI::HeavyKnob> knobDiepte;
     std::unique_ptr<AllyGUI::HeavyKnob> knobPolderPunch;
+    std::unique_ptr<AllyGUI::HeavyKnob> knobAttack;
     std::unique_ptr<AllyGUI::HeavyKnob> knobVerval;
+    std::unique_ptr<AllyGUI::HeavyKnob> knobRelease;
     std::unique_ptr<AllyGUI::HeavyKnob> knobHavenDirt;
     std::unique_ptr<AllyGUI::HeavyKnob> knobWeerwaterGlide;
     std::unique_ptr<AllyGUI::HeavyKnob> knobMasterVol;
