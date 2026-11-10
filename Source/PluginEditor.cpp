@@ -249,7 +249,7 @@ void AllyBassAudioProcessorEditor::resized()
 
     // Header area (56px)
     area.removeFromTop(56);
-    int presetWidth = 200;
+    int presetWidth = 236;
     presetLabel.setBounds(getWidth() / 2 - presetWidth / 2 - 58, 16, 52, 24);
     presetBox.setBounds(getWidth() / 2 - presetWidth / 2, 16, presetWidth, 24);
 
