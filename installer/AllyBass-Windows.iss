@@ -9,7 +9,7 @@
 #define AppVersion "1.0.0"
 #define AppPublisher "JUICED UNICORN / IZHIA ARTS / 42GRAM"
 #define AppURL     "https://github.com/izhia-arts/ally-bass"
-#define VST3Dir    "staging\VST3\ALLY BASS.vst3"
+#define VST3Dir    "staging\ALLY BASS.vst3"
 
 [Setup]
 AppId={{8F3A1C2D-4B5E-6F7A-8B9C-0D1E2F3A4B5C}

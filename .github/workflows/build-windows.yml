@@ -47,8 +47,9 @@ jobs:
       - name: Stage VST3
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path installer\staging\VST3
-          Copy-Item -Recurse "$Env:VST3_PATH" installer\staging\VST3\
+          New-Item -ItemType Directory -Force -Path installer\staging
+          Copy-Item -Recurse -Force "$Env:VST3_PATH" -Destination installer\staging\
+          Get-ChildItem -Recurse installer\staging
 
       # ── 7. Install Inno Setup ─────────────────────────────────────────────
       - name: Install Inno Setup
