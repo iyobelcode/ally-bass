@@ -20,6 +20,9 @@ public:
 
     bool keyPressed(const juce::KeyPress& key) override;
     bool keyStateChanged(bool isKeyDown) override;
+    void focusGained(juce::Component::FocusChangeType) override;
+    void focusLost(juce::Component::FocusChangeType) override;
+    void releaseAllPressedKeys();
 
 private:
     AllyBassAudioProcessor& audioProcessor;

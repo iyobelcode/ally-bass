@@ -92,6 +92,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     btnOctaveDown.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
     btnOctaveDown.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
     btnOctaveDown.onClick = [this]() {
+        releaseAllPressedKeys();
         currentOctave = juce::jmax(0, currentOctave - 1);
         lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
         repaint();
@@ -101,6 +102,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     btnOctaveUp.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
     btnOctaveUp.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
     btnOctaveUp.onClick = [this]() {
+        releaseAllPressedKeys();
         currentOctave = juce::jmin(5, currentOctave + 1);
         lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
         repaint();
@@ -118,7 +120,26 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
 
 AllyBassAudioProcessorEditor::~AllyBassAudioProcessorEditor()
 {
+    releaseAllPressedKeys();
     setLookAndFeel(nullptr);
+}
+
+void AllyBassAudioProcessorEditor::focusGained(juce::Component::FocusChangeType)
+{
+}
+
+void AllyBassAudioProcessorEditor::focusLost(juce::Component::FocusChangeType)
+{
+    releaseAllPressedKeys();
+}
+
+void AllyBassAudioProcessorEditor::releaseAllPressedKeys()
+{
+    for (auto& pair : activeNotesByKey)
+    {
+        audioProcessor.getKeyboardState().noteOff(1, pair.second, 0.0f);
+    }
+    activeNotesByKey.clear();
 }
 
 bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
@@ -126,6 +147,7 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     // Octave Shift: Z / X
     if (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z')
     {
+        releaseAllPressedKeys();
         currentOctave = juce::jmax(0, currentOctave - 1);
         lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
         repaint();
@@ -133,6 +155,7 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     }
     if (key.getKeyCode() == 'X' || key.getKeyCode() == 'x')
     {
+        releaseAllPressedKeys();
         currentOctave = juce::jmin(5, currentOctave + 1);
         lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
         repaint();

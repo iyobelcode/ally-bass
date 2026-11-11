@@ -74,10 +74,13 @@ public:
         }
         else
         {
-            // Fall back to previous active note in stack
+            // Belangrijk voor bassline synth: bij loslaten van een toets gliden we NIET onbedoeld
+            // terug naar een eerdere vastgehouden noot als legato slide, tenzij die expliciet gespeeld wordt.
+            // Dit voorkomt dat het loslaten van een muisklik de bas plotseling octaven omhoog/omlaag schiet!
+            isLegato = false;
             int prevNote = activeNotes.back();
             targetFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(prevNote));
-            isLegato = true;
+            currentFrequency = targetFrequency;
         }
     }
 
