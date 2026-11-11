@@ -150,18 +150,34 @@ void AllyBassAudioProcessorEditor::updateKeyboardRange()
         keyboardComponent.setKeyWidth(static_cast<float>(keyboardComponent.getWidth()) / 22.0f);
 }
 
-void AllyBassAudioProcessorEditor::releaseAllPressedKeys()
+void AllyBassAudioProcessorEditor::releaseQwertyNotesOnly()
 {
     for (auto& pair : activeNotesByKey)
     {
         audioProcessor.getKeyboardState().noteOff(1, pair.second, 0.0f);
     }
     activeNotesByKey.clear();
+}
+
+void AllyBassAudioProcessorEditor::releaseAllPressedKeys()
+{
+    releaseQwertyNotesOnly();
     audioProcessor.getKeyboardState().allNotesOff(1);
+}
+
+void AllyBassAudioProcessorEditor::modifierKeysChanged(const juce::ModifierKeys& modifiers)
+{
+    if (modifiers.isCommandDown() || modifiers.isCtrlDown())
+    {
+        releaseQwertyNotesOnly();
+    }
 }
 
 bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 {
+    if (key.getModifiers().isCommandDown() || key.getModifiers().isCtrlDown())
+        return false;
+
     // Octave Shift: Z / X
     if (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z')
     {
@@ -185,6 +201,15 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
 {
     juce::ignoreUnused(isKeyDown);
+
+    const auto mods = juce::ModifierKeys::getCurrentModifiersRealtime();
+    const bool cmdOrCtrlDown = mods.isCommandDown() || mods.isCtrlDown();
+
+    if (cmdOrCtrlDown)
+    {
+        releaseQwertyNotesOnly();
+        return false;
+    }
 
     struct KeyMapping {
         int keyCode;
@@ -210,6 +235,8 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
         { 'P', 15 }  // D# (+1)
     };
 
+    bool anyHandled = false;
+
     for (const auto& k : map)
     {
         bool down = juce::KeyPress::isKeyCurrentlyDown(k.keyCode) ||
@@ -223,17 +250,19 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
             int note = (currentOctave + 1) * 12 + k.noteOffset;
             activeNotesByKey[k.keyCode] = note;
             audioProcessor.getKeyboardState().noteOn(1, note, 0.9f);
+            anyHandled = true;
         }
         else if (!down && wasDown)
         {
             int note = it->second;
             activeNotesByKey.erase(it);
             audioProcessor.getKeyboardState().noteOff(1, note, 0.0f);
+            anyHandled = true;
         }
     }
 
     // Veiligheid: als geen enkele toets meer ingedrukt is maar er staan nog actieve keys in de map, stop ze
-    if (activeNotesByKey.empty() == false)
+    if (!activeNotesByKey.empty())
     {
         for (auto it = activeNotesByKey.begin(); it != activeNotesByKey.end(); )
         {
@@ -244,6 +273,7 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
                 int noteToStop = it->second;
                 it = activeNotesByKey.erase(it);
                 audioProcessor.getKeyboardState().noteOff(1, noteToStop, 0.0f);
+                anyHandled = true;
             }
             else
             {
@@ -252,7 +282,7 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
         }
     }
 
-    return true;
+    return anyHandled;
 }
 
 void AllyBassAudioProcessorEditor::setupPresets()

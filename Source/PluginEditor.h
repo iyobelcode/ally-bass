@@ -20,8 +20,10 @@ public:
 
     bool keyPressed(const juce::KeyPress& key) override;
     bool keyStateChanged(bool isKeyDown) override;
+    void modifierKeysChanged(const juce::ModifierKeys& modifiers) override;
     void focusGained(juce::Component::FocusChangeType) override;
     void focusLost(juce::Component::FocusChangeType) override;
+    void releaseQwertyNotesOnly();
     void releaseAllPressedKeys();
 
 private:

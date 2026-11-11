@@ -196,6 +196,7 @@ void AllyBassAudioProcessor::updateEnvelopeRates(float attackMs, float releaseMs
 
 void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount)
 {
+    juce::ignoreUnused(punchAmount);
     if (message.isNoteOn())
     {
         float glideMs = apvts.getRawParameterValue("weerwaterGlide")->load();
@@ -266,16 +267,17 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     auto* leftOut = buffer.getWritePointer(0);
     auto* rightOut = totalNumOutputChannels > 1 ? buffer.getWritePointer(1) : nullptr;
 
-    auto midiIterator = midiMessages.findNextSamplePosition(0);
+    auto midiIterator = midiMessages.cbegin();
+    const auto midiEnd = midiMessages.cend();
     float sumSubRms = 0.0f;
 
     for (int sample = 0; sample < numSamples; ++sample)
     {
-        // Process MIDI events at exact sample positions
-        while (midiIterator != midiMessages.end() && (*midiIterator).samplePosition == sample)
+        // Process all MIDI events at (or before) this exact sample position sequentially
+        while (midiIterator != midiEnd && (*midiIterator).samplePosition <= sample)
         {
             handleMidiEvent((*midiIterator).getMessage(), attackMs, polderPunch);
-            midiIterator = midiMessages.findNextSamplePosition(sample + 1);
+            ++midiIterator;
         }
 
         // Advance synth voice
@@ -343,6 +345,13 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         int writeIdx = visualizerWriteIndex.load(std::memory_order_relaxed);
         visualizerBuffer[static_cast<size_t>(writeIdx)] = synthSample;
         visualizerWriteIndex.store((writeIdx + 1) % visualizerBufferSize, std::memory_order_release);
+    }
+
+    // Drain any MIDI events stamped past the block end so noteOffs are never lost
+    while (midiIterator != midiEnd)
+    {
+        handleMidiEvent((*midiIterator).getMessage(), attackMs, polderPunch);
+        ++midiIterator;
     }
 
     // Update real-time RMS for visualizer
