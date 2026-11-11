@@ -209,8 +209,8 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
         else if (!down && wasDown)
         {
             int note = it->second;
-            audioProcessor.getKeyboardState().noteOff(1, note, 0.0f);
             activeNotesByKey.erase(it);
+            audioProcessor.getKeyboardState().noteOff(1, note, 0.0f);
         }
     }
 
@@ -223,8 +223,9 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
                         juce::KeyPress::isKeyCurrentlyDown(std::tolower(it->first));
             if (!down)
             {
-                audioProcessor.getKeyboardState().noteOff(1, it->second, 0.0f);
+                int noteToStop = it->second;
                 it = activeNotesByKey.erase(it);
+                audioProcessor.getKeyboardState().noteOff(1, noteToStop, 0.0f);
             }
             else
             {

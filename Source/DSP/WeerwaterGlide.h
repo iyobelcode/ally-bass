@@ -53,7 +53,9 @@ public:
         {
             // Legato note transition: glide smoothly to new target frequency
             targetFrequency = targetFreq;
-            isLegato = true;
+            isLegato = (glideTimeMs > 0.001f);
+            if (!isLegato)
+                currentFrequency = targetFreq; // Geen glide ingesteld: direct op de juiste toonhoogte springen
             triggerTransient = false; // legato slides preserve the continuous 808 body
             resetPhase = false;
         }
@@ -74,13 +76,13 @@ public:
         }
         else
         {
-            // Belangrijk voor bassline synth: bij loslaten van een toets gliden we NIET onbedoeld
-            // terug naar een eerdere vastgehouden noot als legato slide, tenzij die expliciet gespeeld wordt.
-            // Dit voorkomt dat het loslaten van een muisklik de bas plotseling octaven omhoog/omlaag schiet!
-            isLegato = false;
+            // Bass synth legato behaviour:
+            // Als er nog een eerdere noot vastgehouden wordt, schakel over naar die noot
             int prevNote = activeNotes.back();
             targetFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(prevNote));
+            // Zet currentFrequency direct gelijk aan targetFrequency om ongewenst omhoog/omlaag glijden te voorkomen
             currentFrequency = targetFrequency;
+            isLegato = false;
         }
     }
 
