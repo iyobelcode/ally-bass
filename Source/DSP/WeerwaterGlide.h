@@ -30,10 +30,9 @@ public:
 
     void noteOn(int midiNoteNumber, float velocity, float glideTimeMs)
     {
-        // Add to active notes stack
-        auto it = std::find(activeNotes.begin(), activeNotes.end(), midiNoteNumber);
-        if (it != activeNotes.end())
-            activeNotes.erase(it);
+        // Bassline Synth is strikt monofoon:
+        // Een nieuwe aanslag wordt direct de enige actieve leidende basnoot.
+        activeNotes.clear();
         activeNotes.push_back(midiNoteNumber);
 
         float targetFreq = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
@@ -41,22 +40,22 @@ public:
 
         if (!isNoteActive)
         {
-            // First note strike: jump directly to note, trigger transient and phase lock
+            // Eerste nootaanslag vanuit stilte
             currentFrequency = targetFreq;
             targetFrequency = targetFreq;
             isNoteActive = true;
             isLegato = false;
             triggerTransient = true;
-            resetPhase = false; // Voorkom harde fasereset (klikje)
+            resetPhase = false;
         }
         else
         {
-            // Legato note transition: glide smoothly to new target frequency
+            // Legato overgang naar nieuwe noot
             targetFrequency = targetFreq;
             isLegato = (glideTimeMs > 0.001f);
             if (!isLegato)
-                currentFrequency = targetFreq; // Geen glide ingesteld: direct op de juiste toonhoogte springen
-            triggerTransient = false; // legato slides preserve the continuous 808 body
+                currentFrequency = targetFreq; // Zonder glide direct naar doelpitch
+            triggerTransient = false;
             resetPhase = false;
         }
 
@@ -72,16 +71,6 @@ public:
         if (activeNotes.empty())
         {
             isNoteActive = false;
-            isLegato = false;
-        }
-        else
-        {
-            // Bass synth legato behaviour:
-            // Als er nog een eerdere noot vastgehouden wordt, schakel over naar die noot
-            int prevNote = activeNotes.back();
-            targetFrequency = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(prevNote));
-            // Zet currentFrequency direct gelijk aan targetFrequency om ongewenst omhoog/omlaag glijden te voorkomen
-            currentFrequency = targetFrequency;
             isLegato = false;
         }
     }

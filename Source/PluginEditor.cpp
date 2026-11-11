@@ -140,6 +140,7 @@ void AllyBassAudioProcessorEditor::releaseAllPressedKeys()
         audioProcessor.getKeyboardState().noteOff(1, pair.second, 0.0f);
     }
     activeNotesByKey.clear();
+    audioProcessor.getKeyboardState().allNotesOff(1);
 }
 
 bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
