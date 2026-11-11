@@ -71,6 +71,10 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     setupPresets();
 
     // 7. Interactive Keyboard Component
+    // Schakel ingebouwde QWERTY-mapping (die standaard op C5 staat!) en focus-steal van MidiKeyboardComponent UIT,
+    // zodat alleen de Editor QWERTY-toetsen afhandelt in het gekozen octaaf (bijv. C2).
+    keyboardComponent.clearKeyMappings();
+    keyboardComponent.setWantsKeyboardFocus(false);
     keyboardComponent.setAvailableRange(12, 84); // C0 tot C6 (breed bereik)
     keyboardComponent.setKeyWidth(20.0f);
     keyboardComponent.setScrollButtonsVisible(false);
@@ -91,6 +95,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
 
     btnOctaveDown.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
     btnOctaveDown.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
+    btnOctaveDown.setWantsKeyboardFocus(false);
     btnOctaveDown.onClick = [this]() {
         releaseAllPressedKeys();
         currentOctave = juce::jmax(0, currentOctave - 1);
@@ -101,6 +106,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
 
     btnOctaveUp.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
     btnOctaveUp.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
+    btnOctaveUp.setWantsKeyboardFocus(false);
     btnOctaveUp.onClick = [this]() {
         releaseAllPressedKeys();
         currentOctave = juce::jmin(5, currentOctave + 1);
