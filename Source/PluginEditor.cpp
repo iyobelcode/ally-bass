@@ -75,9 +75,9 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     // zodat alleen de Editor QWERTY-toetsen afhandelt in het gekozen octaaf (bijv. C2).
     keyboardComponent.clearKeyMappings();
     keyboardComponent.setWantsKeyboardFocus(false);
-    keyboardComponent.setAvailableRange(12, 84); // C0 tot C6 (breed bereik)
-    keyboardComponent.setKeyWidth(20.0f);
+    keyboardComponent.setOctaveForMiddleC(4); // C2 = MIDI 36, C4 = MIDI 60
     keyboardComponent.setScrollButtonsVisible(false);
+    updateKeyboardRange();
     keyboardComponent.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xff22252a));
     keyboardComponent.setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xff101214));
     keyboardComponent.setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
@@ -99,7 +99,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     btnOctaveDown.onClick = [this]() {
         releaseAllPressedKeys();
         currentOctave = juce::jmax(0, currentOctave - 1);
-        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+        updateKeyboardRange();
         repaint();
     };
     addAndMakeVisible(btnOctaveDown);
@@ -110,7 +110,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     btnOctaveUp.onClick = [this]() {
         releaseAllPressedKeys();
         currentOctave = juce::jmin(5, currentOctave + 1);
-        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+        updateKeyboardRange();
         repaint();
     };
     addAndMakeVisible(btnOctaveUp);
@@ -139,6 +139,17 @@ void AllyBassAudioProcessorEditor::focusLost(juce::Component::FocusChangeType)
     releaseAllPressedKeys();
 }
 
+void AllyBassAudioProcessorEditor::updateKeyboardRange()
+{
+    int lowNote = (currentOctave + 1) * 12; // e.g. Octave 2 -> MIDI 36 (C2)
+    int highNote = juce::jmin(120, lowNote + 36); // 3 volledige octaven (22 witte toetsen)
+    keyboardComponent.setAvailableRange(lowNote, highNote);
+    lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+
+    if (keyboardComponent.getWidth() > 0)
+        keyboardComponent.setKeyWidth(static_cast<float>(keyboardComponent.getWidth()) / 22.0f);
+}
+
 void AllyBassAudioProcessorEditor::releaseAllPressedKeys()
 {
     for (auto& pair : activeNotesByKey)
@@ -156,7 +167,7 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     {
         releaseAllPressedKeys();
         currentOctave = juce::jmax(0, currentOctave - 1);
-        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+        updateKeyboardRange();
         repaint();
         return true;
     }
@@ -164,7 +175,7 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     {
         releaseAllPressedKeys();
         currentOctave = juce::jmin(5, currentOctave + 1);
-        lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+        updateKeyboardRange();
         repaint();
         return true;
     }
@@ -282,15 +293,15 @@ void AllyBassAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(AllyGUI::BrutalistLookAndFeel::concreteBorder);
     g.drawHorizontalLine(static_cast<int>(headerArea.getBottom()), 0.0f, bounds.getRight());
 
-    // Logo Typography: ALLY BASS
-    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 24.0f, juce::Font::bold));
+    // Logo Typography: ALLY - 1300 SUB SYNTH
+    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 17.5f, juce::Font::bold));
     g.setColour(AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
-    g.drawText("ALLY BASS", 16, 6, 160, 26, juce::Justification::left);
+    g.drawText("ALLY - 1300 SUB SYNTH", 16, 10, 260, 22, juce::Justification::left);
 
     // Subtitle & Postcode badge
     g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 9.5f, juce::Font::plain));
     g.setColour(AllyGUI::BrutalistLookAndFeel::industrialText);
-    g.drawText("1300 ALMERE // -4.5m SUB SYNTH", 18, 32, 220, 14, juce::Justification::left);
+    g.drawText("1300 ALMERE // -4.5m NAP", 18, 34, 240, 14, juce::Justification::left);
 
     // Header Info
     g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 9.5f, juce::Font::plain));
@@ -324,9 +335,10 @@ void AllyBassAudioProcessorEditor::resized()
 
     // Header area (56px)
     area.removeFromTop(56);
-    int presetWidth = 236;
-    presetLabel.setBounds(getWidth() / 2 - presetWidth / 2 - 58, 16, 52, 24);
-    presetBox.setBounds(getWidth() / 2 - presetWidth / 2, 16, presetWidth, 24);
+    int presetWidth = 228;
+    int centerX = (280 + (getWidth() - 125)) / 2;
+    presetLabel.setBounds(centerX - presetWidth / 2 - 22, 16, 52, 24);
+    presetBox.setBounds(centerX - presetWidth / 2 + 32, 16, presetWidth, 24);
 
     // Footer area (30px)
     area.removeFromBottom(30);
@@ -340,6 +352,7 @@ void AllyBassAudioProcessorEditor::resized()
 
     keyboardRow.removeFromLeft(8); // kleine marge
     keyboardComponent.setBounds(keyboardRow);
+    keyboardComponent.setKeyWidth(static_cast<float>(keyboardRow.getWidth()) / 22.0f);
 
     // Middle Visualizer Area (~140px)
     auto visualizerArea = area.removeFromTop(140).reduced(14, 4);

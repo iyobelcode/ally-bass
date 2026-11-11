@@ -5,11 +5,11 @@
 ;  Theme: Almere, Nederland – 1300 / 036
 ; ═══════════════════════════════════════════════════════════════════════════
 
-#define AppName    "ALLY BASS"
+#define AppName    "ALLY - 1300 SUB SYNTH"
 #define AppVersion "1.0.0"
 #define AppPublisher "JUICED UNICORN / IZHIA ARTS / 42GRAM"
-#define AppURL     "https://github.com/izhia-arts/ally-bass"
-#define VST3Dir    "staging\ALLY BASS.vst3"
+#define AppURL     "https://github.com/iyobelcode/ally-bass"
+#define VST3Dir    "staging\ALLY - 1300 SUB SYNTH.vst3"
 
 [Setup]
 SourceDir=.
@@ -44,7 +44,7 @@ PrivilegesRequired=admin
 ; Uninstaller
 Uninstallable=yes
 UninstallDisplayName={#AppName}
-UninstallDisplayIcon={app}\ALLY BASS.vst3\Contents\x86_64-win\ALLY BASS.vst3
+UninstallDisplayIcon={app}\ALLY - 1300 SUB SYNTH.vst3\Contents\x86_64-win\ALLY - 1300 SUB SYNTH.vst3
 ; Misc
 DisableDirPage=no
 DisableProgramGroupPage=yes
@@ -54,12 +54,12 @@ DisableProgramGroupPage=yes
 ; ── Banner ────────────────────────────────────────────────────────────────
 [Messages]
 WelcomeLabel1=Welkom bij de {#AppName} installer
-WelcomeLabel2=ALLY BASS is een grensverleggende VST3 Bassline Synthesizer gebouwd in Almere, Nederland.%n%nGebaseerd op de zeebodem (-4,5m NAP) · Netnummer 036 · Postcodegebied 1300%n%n JUICED UNICORN / IZHIA ARTS / 42GRAM
+WelcomeLabel2=ALLY - 1300 SUB SYNTH is een grensverleggende VST3 Bassline Synthesizer gebouwd in Almere, Nederland.%n%nGebaseerd op de zeebodem (-4,5m NAP) · Netnummer 036 · Postcodegebied 1300%n%n JUICED UNICORN / IZHIA ARTS / 42GRAM
 
 ; ── Files ─────────────────────────────────────────────────────────────────
 [Files]
 ; The VST3 bundle (a directory on Windows) → installs to Common Files\VST3\
-Source: "{#VST3Dir}\*"; DestDir: "{commonpf64}\Common Files\VST3\ALLY BASS.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#VST3Dir}\*"; DestDir: "{commonpf64}\Common Files\VST3\ALLY - 1300 SUB SYNTH.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; ── Registry ──────────────────────────────────────────────────────────────
 [Registry]

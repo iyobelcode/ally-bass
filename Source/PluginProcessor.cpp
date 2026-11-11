@@ -216,7 +216,8 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
     }
     else if (message.isNoteOff())
     {
-        weerwaterGlide.noteOff(message.getNoteNumber());
+        float glideMs = apvts.getRawParameterValue("weerwaterGlide")->load();
+        weerwaterGlide.noteOff(message.getNoteNumber(), glideMs);
         if (!weerwaterGlide.getIsNoteActive())
         {
             envState = EnvelopeState::Release;

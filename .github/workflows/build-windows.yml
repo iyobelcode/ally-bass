@@ -38,7 +38,7 @@ jobs:
       - name: Find VST3 artefact
         shell: pwsh
         run: |
-          $vst3 = Get-ChildItem -Recurse -Filter "ALLY BASS.vst3" build | Select-Object -First 1
+          $vst3 = Get-ChildItem -Recurse -Filter "ALLY - 1300 SUB SYNTH.vst3" build | Select-Object -First 1
           if (-not $vst3) { Write-Error "VST3 not found!"; exit 1 }
           Write-Output "VST3_PATH=$($vst3.FullName)" | Out-File $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "Found: $($vst3.FullName)"

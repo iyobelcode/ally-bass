@@ -19,6 +19,11 @@ else()
     FetchContent_MakeAvailable(JUCE)
 endif()
 
+set(ALLY_PLUGIN_FORMATS VST3 Standalone)
+if(APPLE)
+    list(APPEND ALLY_PLUGIN_FORMATS AU)
+endif()
+
 juce_add_plugin(AllyBass
     COMPANY_NAME "JUICED UNICORN"
     IS_SYNTH TRUE
@@ -29,8 +34,8 @@ juce_add_plugin(AllyBass
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE JUnc
     PLUGIN_CODE AlBa
-    FORMATS VST3 $<$<PLATFORM_ID:Darwin>:AU> Standalone
-    PRODUCT_NAME "ALLY BASS"
+    FORMATS ${ALLY_PLUGIN_FORMATS}
+    PRODUCT_NAME "ALLY - 1300 SUB SYNTH"
     BUNDLE_ID "com.juicedunicorn.allybass"
 )
 

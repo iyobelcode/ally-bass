@@ -30,9 +30,10 @@ public:
 
     void noteOn(int midiNoteNumber, float velocity, float glideTimeMs)
     {
-        // Bassline Synth is strikt monofoon:
-        // Een nieuwe aanslag wordt direct de enige actieve leidende basnoot.
-        activeNotes.clear();
+        // Monofone note stack: verwijder eventueel duplicaat en voeg nieuwe noot bovenaan toe
+        auto it = std::find(activeNotes.begin(), activeNotes.end(), midiNoteNumber);
+        if (it != activeNotes.end())
+            activeNotes.erase(it);
         activeNotes.push_back(midiNoteNumber);
 
         float targetFreq = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
@@ -62,7 +63,7 @@ public:
         updateGlideCoeff(glideTimeMs, velocity);
     }
 
-    void noteOff(int midiNoteNumber)
+    void noteOff(int midiNoteNumber, float glideTimeMs = 0.0f)
     {
         auto it = std::find(activeNotes.begin(), activeNotes.end(), midiNoteNumber);
         if (it != activeNotes.end())
@@ -72,6 +73,17 @@ public:
         {
             isNoteActive = false;
             isLegato = false;
+        }
+        else
+        {
+            // Als er nog een eerder vastgehouden noot in de stack zit: terugkeren (en gliden indien aan)
+            int prevNote = activeNotes.back();
+            float prevFreq = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(prevNote));
+            targetFrequency = prevFreq;
+            isLegato = (glideTimeMs > 0.001f);
+            if (!isLegato)
+                currentFrequency = prevFreq;
+            updateGlideCoeff(glideTimeMs, currentVelocity);
         }
     }
 
