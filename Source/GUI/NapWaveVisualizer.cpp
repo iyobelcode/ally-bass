@@ -200,10 +200,6 @@ void NapWaveVisualizer::drawTechnicalTelemetry(juce::Graphics& g, juce::Rectangl
     g.drawText("WEERWATER VECTOR SCOPE // NAP LOCK ACTIVE",
                static_cast<int>(bounds.getX() + 10.0f), static_cast<int>(bounds.getY() + 8.0f), 320, 12, juce::Justification::left);
 
-    // Top-right: Almere coordinates
-    g.drawText("52.3702\xc2\xb0 N, 5.2144\xc2\xb0 E [036]",
-               static_cast<int>(bounds.getRight() - 220.0f), static_cast<int>(bounds.getY() + 8.0f), 210, 12, juce::Justification::right);
-
     // Bottom-left: Sub activity meter
     juce::String status = smoothRms > 0.02f ? "SUB DIVE ACTIVE [-4.5m]" : "POLDER STANDBY";
     g.setColour(smoothRms > 0.02f ? BrutalistLookAndFeel::weerwaterTeal : BrutalistLookAndFeel::mutedText);

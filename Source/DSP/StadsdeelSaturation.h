@@ -134,7 +134,7 @@ private:
         // Poort (1363): Ultra-cleane, moderne sub-boost met subtiele harmonische opwinding
         // Sub stays 100% clean and solid; subtle Chebyshev 2nd harmonic added for presence
         float cleanSub = x * (1.0f + drive * 0.4f);
-        float chebyshev2nd = 2.0f * (x * x) - 1.0f;
+        float chebyshev2nd = 2.0f * (x * x);
         
         // Blend in minimal excitement
         float exciter = chebyshev2nd * (drive * 0.15f);

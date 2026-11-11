@@ -261,11 +261,10 @@ void AllyBassAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(AllyGUI::BrutalistLookAndFeel::industrialText);
     g.drawText("1300 ALMERE // -4.5m SUB SYNTH", 18, 32, 220, 14, juce::Justification::left);
 
-    // Header Coordinates (Almere Centrum)
+    // Header Info
     g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 9.5f, juce::Font::plain));
     g.setColour(AllyGUI::BrutalistLookAndFeel::mutedText);
-    g.drawText("52.3702\xc2\xb0 N, 5.2144\xc2\xb0 E", getWidth() - 170, 10, 150, 14, juce::Justification::right);
-    g.drawText("NETNUMMER: 036", getWidth() - 170, 26, 150, 14, juce::Justification::right);
+    g.drawText("NETNUMMER: 036", getWidth() - 170, 18, 150, 14, juce::Justification::right);
 
     // Panel separator above footer
     float footerY = static_cast<float>(getHeight() - 30);

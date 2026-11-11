@@ -183,8 +183,8 @@ void AllyBassAudioProcessor::updateEnvelopeRates(float attackMs, float releaseMs
 
     float sampleRateFloat = static_cast<float>(sr);
 
-    // Attack rate: linear increment per sample from 0 to targetVelocity
-    float attackSec = juce::jmax(0.0002f, attackMs * 0.001f);
+    // 1. Attack rate: smooth linear increment per sample towards targetVelocity (minimaal 8ms)
+    float attackSec = juce::jmax(0.008f, attackMs * 0.001f);
     float attackSamples = attackSec * sampleRateFloat;
     attackRate = 1.0f / attackSamples;
 
@@ -204,16 +204,15 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
 
         targetVelocity = vel;
 
-        // Smooth de attack om klikjes te elimineren (minimaal 5ms overgang naar doelvolume)
+        // Smooth de attack om klikjes te elimineren (minimaal 8ms curve)
         envState = EnvelopeState::Attack;
         double sr = getSampleRate();
-        float attackSec = juce::jmax(0.005f, attackMs * 0.001f);
+        float attackSec = juce::jmax(0.008f, attackMs * 0.001f);
         float attackSamples = attackSec * static_cast<float>(sr);
         attackRate = juce::jmax(0.00001f, (targetVelocity - envLevel) / attackSamples);
 
-        // Only trigger transient if punchAmount is dialed in
-        if (punchAmount > 0.01f)
-            polderTransient.trigger(vel, punchAmount);
+        // Geen harde transient trigger om klikjes/tikken te voorkomen; punch module blijft zuiver
+        polderTransient.reset();
     }
     else if (message.isNoteOff())
     {
@@ -316,18 +315,15 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
         float synthSample = 0.0f;
 
-        if (envLevel > 0.0001f || polderTransient.getIsActive())
+        if (envLevel > 0.0001f)
         {
             // 1. NAP Sub-Oscillator (Clean low Sine/Warm hybrid)
             float subWave = napSubOsc.processSample(instantFreq, diepte);
 
-            // 2. Optional Polder Knock (zero if Punch = 0)
-            float punchClick = polderTransient.processSample(polderPunch);
+            // Combine sub core met smoothed envelope
+            synthSample = subWave * envLevel;
 
-            // Combine sub core with transient knock
-            synthSample = (subWave * envLevel) + punchClick;
-
-            // 3. Stadsdeel Saturation
+            // 2. Stadsdeel Saturation
             synthSample = stadsdeelSaturation.processSample(
                 synthSample, havenDirt, static_cast<AllyDSP::StadsdeelMode>(stadsdeelIndex));
         }
