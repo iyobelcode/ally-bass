@@ -178,8 +178,10 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     if (key.getModifiers().isCommandDown() || key.getModifiers().isCtrlDown())
         return false;
 
+    const int upperKey = std::toupper(key.getKeyCode());
+
     // Octave Shift: Z / X
-    if (key.getKeyCode() == 'Z' || key.getKeyCode() == 'z')
+    if (upperKey == 'Z')
     {
         releaseAllPressedKeys();
         currentOctave = juce::jmax(0, currentOctave - 1);
@@ -187,7 +189,7 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
         repaint();
         return true;
     }
-    if (key.getKeyCode() == 'X' || key.getKeyCode() == 'x')
+    if (upperKey == 'X')
     {
         releaseAllPressedKeys();
         currentOctave = juce::jmin(5, currentOctave + 1);
@@ -195,6 +197,14 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
         repaint();
         return true;
     }
+
+    // Consume all mapped musical keys (including macOS key-repeats) so OS alert beep never fires
+    for (const char c : std::string_view("AWSEDFTGYHUJKOLP"))
+    {
+        if (upperKey == static_cast<int>(c))
+            return true;
+    }
+
     return false;
 }
 
