@@ -60,6 +60,8 @@ set(ALLY_SHARED_SOURCES
     Source/GUI/DepthRingLookAndFeel.cpp
     Source/GUI/DepthRingKnob.h
     Source/GUI/DepthRingKnob.cpp
+    Source/GUI/PrimaryKnobsPanel.h
+    Source/GUI/PrimaryKnobsPanel.cpp
     Source/GUI/NapWaveVisualizer.h
     Source/GUI/NapWaveVisualizer.cpp
     Source/GUI/HeavyKnob.h

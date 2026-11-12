@@ -56,20 +56,23 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
     const float rTickOuterMajor = 0.488f * diameter;
     const float rTickOuterMinor = 0.468f * diameter;
     const float rTickInner      = 0.450f * diameter;
-    const float rWell           = 0.442f * diameter;
+    const float rWell           = 0.440f * diameter;
     const float rArc            = 0.422f * diameter;
-    const float rMetalOuter     = 0.394f * diameter;
-    const float rBevelInner     = 0.365f * diameter;
-    const float rDishOuter      = 0.362f * diameter;
+    const float rMetalOuter     = 0.404f * diameter;
+    const float rBevelInner     = 0.366f * diameter;
+    const float rDishOuter      = 0.363f * diameter;
     const float rCapInner       = 0.268f * diameter;
-    const float rPointerOuter   = 0.378f * diameter;
-    const float rPointerInner   = 0.142f * diameter;
+    const float rPointerOuter   = 0.382f * diameter;
+    const float rPointerInner   = 0.145f * diameter;
 
-    const float arcStroke = juce::jmax(2.6f, 0.030f * diameter);
+    const float arcStroke = juce::jmax(2.6f, 0.031f * diameter);
 
-    // 1. Dark circular recessed well behind arc and metallic bezel
+    // 1. Dark circular recessed well behind arc and metallic bezel (subtle machined edge, no black void)
     g.setColour(EngineeredDepthTheme::Colors::dialWell);
     g.fillEllipse(centre.x - rWell, centre.y - rWell, rWell * 2.0f, rWell * 2.0f);
+    g.setColour(EngineeredDepthTheme::Colors::trackDark.withAlpha(0.45f));
+    g.drawEllipse(centre.x - rWell, centre.y - rWell, rWell * 2.0f, rWell * 2.0f,
+                  juce::jmax(0.8f, 0.0045f * diameter));
 
     // 2. Outer technical scale ticks: 24 intervals (11.25 deg), major ticks every 22.5 deg
     constexpr int numSteps = 24;
@@ -163,31 +166,47 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
                                                       rMetalOuter * 2.0f,
                                                       rMetalOuter * 2.0f);
 
+        const float rimTopMix = state.hovered ? 0.72f : 0.56f;
+        const auto steelTop = EngineeredDepthTheme::Colors::metalRimMid
+                                  .interpolatedWith(EngineeredDepthTheme::Colors::metalRimLight, rimTopMix)
+                                  .interpolatedWith(palette.primary, state.active ? 0.07f : 0.02f);
+
         juce::ColourGradient bevelGrad(
-            EngineeredDepthTheme::Colors::metalRimMid.interpolatedWith(EngineeredDepthTheme::Colors::metalRimLight,
-                                                                        state.hovered ? 0.52f : 0.36f),
+            steelTop,
             centre.x, centre.y - rMetalOuter,
-            EngineeredDepthTheme::Colors::metalRimDark.interpolatedWith(EngineeredDepthTheme::Colors::metalRimMid, 0.22f),
-            centre.x, centre.y + rMetalOuter * 0.85f,
+            EngineeredDepthTheme::Colors::metalRimDark.interpolatedWith(EngineeredDepthTheme::Colors::metalRimMid, 0.32f),
+            centre.x, centre.y + rMetalOuter * 0.90f,
             false);
-        bevelGrad.addColour(0.55, EngineeredDepthTheme::Colors::bg);
+        bevelGrad.addColour(0.28, EngineeredDepthTheme::Colors::metalRimMid.interpolatedWith(EngineeredDepthTheme::Colors::metalRimLight, 0.18f));
+        bevelGrad.addColour(0.60, EngineeredDepthTheme::Colors::bg);
         g.setGradientFill(bevelGrad);
         g.fillEllipse(rimBounds);
 
-        // Top specular rim lip
-        const float rimStroke = juce::jmax(1.0f, 0.0065f * diameter);
+        // Soft machined outer contour so bottom bevel integrates with track groove
+        const float rimStroke = juce::jmax(1.0f, 0.0070f * diameter);
+        g.setColour(EngineeredDepthTheme::Colors::metalRimMid.withAlpha(0.32f));
+        g.drawEllipse(rimBounds.reduced(rimStroke * 0.4f), rimStroke * 0.85f);
+
+        // Broadened, brighter top steel-blue specular rim sheen
+        juce::Path topSoftSpec;
+        topSoftSpec.addCentredArc(centre.x, centre.y, rMetalOuter - rimStroke * 0.9f, rMetalOuter - rimStroke * 0.9f,
+                                  0.0f, -1.24f, 1.24f, true);
+        g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(state.hovered ? 0.30f : 0.22f));
+        g.strokePath(topSoftSpec, juce::PathStrokeType(rimStroke * 2.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
         juce::Path topSpec;
         topSpec.addCentredArc(centre.x, centre.y, rMetalOuter - rimStroke * 0.5f, rMetalOuter - rimStroke * 0.5f,
-                              0.0f, -0.90f, 0.90f, true);
-        g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(state.hovered ? 0.46f : 0.30f));
+                              0.0f, -1.12f, 1.12f, true);
+        g.setColour(EngineeredDepthTheme::Colors::metalRimLight.interpolatedWith(EngineeredDepthTheme::Colors::textPrimary, 0.20f)
+                        .withAlpha(state.hovered ? 0.62f : 0.48f));
         g.strokePath(topSpec, juce::PathStrokeType(rimStroke, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-        // Subtle lower-right rim catch-light (~4:30) matching machined metal bevel
+        // Subtle strengthened lower-right rim catch-light (~3:30-5:15) matching machined metal bevel
         juce::Path lowerSpec;
         lowerSpec.addCentredArc(centre.x, centre.y, rMetalOuter - rimStroke * 0.5f, rMetalOuter - rimStroke * 0.5f,
-                                0.0f, 2.00f, 2.75f, true);
-        g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.24f));
-        g.strokePath(lowerSpec, juce::PathStrokeType(rimStroke * 0.80f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                                0.0f, 1.85f, 2.75f, true);
+        g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(state.hovered ? 0.48f : 0.38f));
+        g.strokePath(lowerSpec, juce::PathStrokeType(rimStroke * 0.95f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
     // 6. Dark recessed ring between outer bezel and dish + inner dial cap
@@ -204,19 +223,23 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
                                                        rDishOuter * 2.0f,
                                                        rDishOuter * 2.0f);
 
+        const auto dishTopCol = EngineeredDepthTheme::Colors::dialFaceTop
+                                    .interpolatedWith(EngineeredDepthTheme::Colors::metalRimLight,
+                                                      state.hovered ? 0.24f : 0.14f)
+                                    .interpolatedWith(palette.primary, state.active ? 0.06f : 0.0f);
         juce::ColourGradient dishGrad(
-            EngineeredDepthTheme::Colors::dialFaceTop.withMultipliedBrightness(state.hovered ? 1.12f : 0.94f),
-            centre.x + rDishOuter * 0.04f, centre.y - rDishOuter * 0.35f,
+            dishTopCol,
+            centre.x + rDishOuter * 0.02f, centre.y - rDishOuter * 0.42f,
             EngineeredDepthTheme::Colors::dialFaceBot,
-            centre.x, centre.y + rDishOuter * 0.90f,
+            centre.x, centre.y + rDishOuter * 0.88f,
             true);
-        dishGrad.addColour(0.45, EngineeredDepthTheme::Colors::dialFaceMid);
+        dishGrad.addColour(0.46, EngineeredDepthTheme::Colors::dialFaceMid);
         g.setGradientFill(dishGrad);
         g.fillEllipse(dishBounds);
 
         // Delicate upper bevel highlight on dish edge
-        g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(state.hovered ? 0.38f : 0.22f));
-        g.drawEllipse(dishBounds.reduced(0.5f), juce::jmax(0.8f, 0.0050f * diameter));
+        g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(state.hovered ? 0.44f : 0.28f));
+        g.drawEllipse(dishBounds.reduced(0.5f), juce::jmax(0.8f, 0.0055f * diameter));
 
         // Inner circular step cap
         const auto capBounds = juce::Rectangle<float>(centre.x - rCapInner,
@@ -231,23 +254,32 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
         g.setGradientFill(capGrad);
         g.fillEllipse(capBounds);
 
-        g.setColour(EngineeredDepthTheme::Colors::capStroke.withAlpha(state.hovered ? 0.82f : 0.60f));
+        g.setColour(EngineeredDepthTheme::Colors::capStroke.withAlpha(state.hovered ? 0.84f : 0.62f));
         g.drawEllipse(capBounds, juce::jmax(0.8f, 0.005f * diameter));
     }
 
-    // 7. Central vector icon (strictly bounded inside inner cap clearance)
+    // 7. Central vector icon (36-40% cap span, raised 1-2px vs C.1 while preserving needle clearance)
     if (icon != EngineeredDepthIcons::IconId::None)
     {
-        const auto iconBounds = juce::Rectangle<float>(0.215f * diameter, 0.150f * diameter)
-                                    .withCentre({ centre.x, centre.y + 0.025f * diameter });
+        const auto iconBounds = juce::Rectangle<float>(0.228f * diameter, 0.180f * diameter)
+                                    .withCentre({ centre.x, centre.y + 0.010f * diameter });
         const float iconStroke = juce::jmax(1.0f, 0.0072f * diameter);
         const float iconGlow   = state.enabled ? (state.dragging ? 0.30f : (state.hovered ? 0.24f : 0.15f)) : 0.0f;
+
+        // Per approved master (ALLY1300_APPROVED_MASTER_FULL.png): Haven Dirt harbor icon stays cyan/ice-cyan while active
+        const bool keepCoolHarborCyan = (icon == EngineeredDepthIcons::IconId::HavenDirt && state.enabled);
+        const auto iconPrimary = keepCoolHarborCyan
+            ? EngineeredDepthTheme::Colors::cyan
+            : palette.primary.withAlpha(state.enabled ? 0.94f : 0.55f);
+        const auto iconSecondary = keepCoolHarborCyan
+            ? EngineeredDepthTheme::Colors::cyanBright.interpolatedWith(EngineeredDepthTheme::Colors::cyan, 0.28f)
+            : palette.coreHighlight.withAlpha(state.enabled ? 0.90f : 0.45f);
 
         EngineeredDepthIcons::drawIcon(g,
                                        icon,
                                        iconBounds,
-                                       palette.primary.withAlpha(state.enabled ? 0.92f : 0.55f),
-                                       palette.coreHighlight.withAlpha(state.enabled ? 0.88f : 0.45f),
+                                       iconPrimary,
+                                       iconSecondary,
                                        iconStroke,
                                        iconGlow);
     }

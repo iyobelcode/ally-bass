@@ -5,7 +5,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
 #include "GUI/BrutalistLookAndFeel.h"
-#include "GUI/DepthRingKnob.h"
+#include "GUI/PrimaryKnobsPanel.h"
 #include "GUI/NapWaveVisualizer.h"
 #include "GUI/HeavyKnob.h"
 #include "GUI/BrutalistToggle.h"
@@ -44,12 +44,8 @@ private:
     juce::TextButton btnOctaveUp { "+" };
     juce::Label lblOctave;
 
-    // The 5 Big Primary Knobs (Stap C.1: DIEPTE uses new DepthRingKnob; remaining 4 stay legacy until C.2)
-    std::unique_ptr<AllyGUI::DepthRingKnob> knobDiepte;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobPolderPunch;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobHavenDirt;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobWaterwijkGlide;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobMasterVol;
+    // The 5 Big Primary Knobs in the shared Engineered Depth chassis (Stap C.2)
+    std::unique_ptr<AllyGUI::PrimaryKnobsPanel> primaryKnobsPanel;
 
     // The 2 Compact Knobs (Attack & Release)
     std::unique_ptr<AllyGUI::HeavyKnob> knobAttack;

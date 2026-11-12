@@ -108,6 +108,10 @@ struct EngineeredDepthTheme
     static juce::Font makeDataFont(float pointSize, bool bold = false);
 
     // Reusable vector surface, contour, readout, pill & focus primitives
+    static juce::Path buildChamferedRectPath(juce::Rectangle<float> bounds,
+                                             float topChamfer,
+                                             float bottomChamfer);
+
     static void drawSurfacePanel(juce::Graphics& g,
                                  juce::Rectangle<float> bounds,
                                  float cornerRadius = Metrics::radiusPanel,

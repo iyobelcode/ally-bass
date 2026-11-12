@@ -28,7 +28,8 @@ DepthRingKnob::DepthRingKnob(const DepthRingConfig& cfg, juce::AudioProcessorVal
     if (auto* param = apvts.getParameter(config.paramId))
     {
         const float defaultPlain = param->convertFrom0to1(param->getDefaultValue());
-        slider.setDoubleClickReturnValue(true, static_cast<double>(defaultPlain));
+        const double snappedDefault = slider.getNormalisableRange().snapToLegalValue(static_cast<double>(defaultPlain));
+        slider.setDoubleClickReturnValue(true, snappedDefault);
     }
 
     slider.onValueChange = [this]()
@@ -126,7 +127,7 @@ void DepthRingKnob::resized()
     dialBounds = juce::Rectangle<float>(dialDiameter, dialDiameter)
                      .withCentre({ cx, startY + titleH + pillAreaH + dialDiameter * 0.5f });
 
-    const float readoutW = juce::jmin(inner.getWidth(), juce::jmax(72.0f, dialDiameter * 0.76f));
+    const float readoutW = juce::jmin(inner.getWidth(), juce::jmax(78.0f, dialDiameter * 0.86f));
     readoutBounds = juce::Rectangle<float>(readoutW, readoutH)
                         .withCentre({ cx, dialBounds.getBottom() + bottomGap + readoutH * 0.5f });
 
@@ -151,19 +152,31 @@ void DepthRingKnob::paint(juce::Graphics& g)
                                                palette.focus);
     }
 
-    // 2. Centered uppercase parameter label
-    const float titleFontPx = juce::jlimit(9.5f, 19.0f, dialSize * 0.098f);
+    // 2. Centered uppercase parameter label (with subtle dark contrast backdrop for metallic legibility)
+    const float titleFontPx = juce::jlimit(9.5f, 18.5f, dialSize * 0.095f);
+    const auto titleFont = EngineeredDepthTheme::makeUiFont(titleFontPx, false);
     const auto titleColour = state.enabled
         ? (state.hovered || state.dragging ? EngineeredDepthTheme::Colors::textPrimary
                                            : EngineeredDepthTheme::Colors::textPrimary.withAlpha(0.95f))
         : EngineeredDepthTheme::Colors::disabled;
 
+    if (state.enabled)
+    {
+        EngineeredDepthTheme::drawTrackedText(g,
+                                              config.title,
+                                              titleBounds.translated(0.0f, 0.8f),
+                                              titleFont,
+                                              EngineeredDepthTheme::Colors::black.withAlpha(0.65f),
+                                              0.095f,
+                                              juce::Justification::centred);
+    }
+
     EngineeredDepthTheme::drawTrackedText(g,
                                           config.title,
                                           titleBounds,
-                                          EngineeredDepthTheme::makeUiFont(titleFontPx, false),
+                                          titleFont,
                                           titleColour,
-                                          0.12f,
+                                          0.095f,
                                           juce::Justification::centred);
 
     // 3. Glowing accent pill indicator beneath title

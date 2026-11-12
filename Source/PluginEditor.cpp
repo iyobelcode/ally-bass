@@ -12,35 +12,9 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     // 1. Central Visualizer
     addAndMakeVisible(visualizer);
 
-    // 2. The 5 Big Primary Knobs
-    knobDiepte = std::make_unique<AllyGUI::DepthRingKnob>(
-        AllyGUI::DepthRingConfig{
-            "DIEPTE",
-            "diepte",
-            "NAP",
-            AllyGUI::EngineeredDepthTheme::AccentTheme::Cyan,
-            AllyGUI::EngineeredDepthIcons::IconId::DiepteWater,
-            2,
-            {}
-        },
-        audioProcessor.apvts);
-    addAndMakeVisible(*knobDiepte);
-
-    knobPolderPunch = std::make_unique<AllyGUI::HeavyKnob>(
-        "POLDER PUNCH", "polderPunch", audioProcessor.apvts, "%", true, false);
-    addAndMakeVisible(*knobPolderPunch);
-
-    knobHavenDirt = std::make_unique<AllyGUI::HeavyKnob>(
-        "HAVEN DIRT", "havenDirt", audioProcessor.apvts, "DIRT", true, false);
-    addAndMakeVisible(*knobHavenDirt);
-
-    knobWaterwijkGlide = std::make_unique<AllyGUI::HeavyKnob>(
-        "WATERWIJK GLIDE", "waterwijkGlide", audioProcessor.apvts, "ms", false, false);
-    addAndMakeVisible(*knobWaterwijkGlide);
-
-    knobMasterVol = std::make_unique<AllyGUI::HeavyKnob>(
-        "OUTPUT", "masterVolume", audioProcessor.apvts, "dB", false, false);
-    addAndMakeVisible(*knobMasterVol);
+    // 2. Shared Engineered Depth Primary Knobs Panel (DIEPTE, POLDER PUNCH, HAVEN DIRT, WATERWIJK GLIDE, OUTPUT)
+    primaryKnobsPanel = std::make_unique<AllyGUI::PrimaryKnobsPanel>(audioProcessor.apvts);
+    addAndMakeVisible(*primaryKnobsPanel);
 
     // 3. The 2 Compact Knobs (Attack & Release) placed outside the main big row
     knobAttack = std::make_unique<AllyGUI::HeavyKnob>(
@@ -440,14 +414,6 @@ void AllyBassAudioProcessorEditor::resized()
 
     toggleMonoLock1300->setBounds(startX, bottomRow.getY() + 18, switchWidth, 28);
 
-    // 2. Top Main Knobs Row: Exactly 5 BIG, HEAVY KNOBS
-    // [ DIEPTE ] [ POLDER PUNCH ] [ HAVEN DIRT ] [ WATERWIJK GLIDE ] [ OUTPUT ]
-    int numBigKnobs = 5;
-    float bigKnobWidth = static_cast<float>(controlsArea.getWidth()) / static_cast<float>(numBigKnobs);
-
-    knobDiepte->setBounds(static_cast<int>(controlsArea.getX() + 0 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
-    knobPolderPunch->setBounds(static_cast<int>(controlsArea.getX() + 1 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
-    knobHavenDirt->setBounds(static_cast<int>(controlsArea.getX() + 2 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
-    knobWaterwijkGlide->setBounds(static_cast<int>(controlsArea.getX() + 3 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
-    knobMasterVol->setBounds(static_cast<int>(controlsArea.getX() + 4 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
+    // 2. Top Main Knobs Row: Engineered Depth chamfered chassis with 5 uniform Depth Rings
+    primaryKnobsPanel->setBounds(controlsArea.reduced(0, 2));
 }

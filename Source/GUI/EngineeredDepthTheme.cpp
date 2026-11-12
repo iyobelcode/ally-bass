@@ -88,6 +88,34 @@ juce::Font EngineeredDepthTheme::makeDataFont(float pointSize, bool bold)
     return juce::Font(options);
 }
 
+juce::Path EngineeredDepthTheme::buildChamferedRectPath(juce::Rectangle<float> bounds,
+                                                        float topChamfer,
+                                                        float bottomChamfer)
+{
+    juce::Path path;
+    if (bounds.isEmpty())
+        return path;
+
+    const float tc = juce::jlimit(0.0f, juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.45f, topChamfer);
+    const float bc = juce::jlimit(0.0f, juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.45f, bottomChamfer);
+
+    const float x1 = bounds.getX();
+    const float y1 = bounds.getY();
+    const float x2 = bounds.getRight();
+    const float y2 = bounds.getBottom();
+
+    path.startNewSubPath(x1 + tc, y1);
+    path.lineTo(x2 - tc, y1);
+    path.lineTo(x2, y1 + tc);
+    path.lineTo(x2, y2 - bc);
+    path.lineTo(x2 - bc, y2);
+    path.lineTo(x1 + bc, y2);
+    path.lineTo(x1, y2 - bc);
+    path.lineTo(x1, y1 + tc);
+    path.closeSubPath();
+    return path;
+}
+
 void EngineeredDepthTheme::drawSurfacePanel(juce::Graphics& g,
                                             juce::Rectangle<float> bounds,
                                             float cornerRadius,
@@ -164,8 +192,8 @@ void EngineeredDepthTheme::drawBracketReadout(juce::Graphics& g,
         g.fillRoundedRectangle(rect, 3.0f);
     }
 
-    const float arm = juce::jlimit(4.5f, 10.0f, rect.getHeight() * 0.30f);
-    const float corner = juce::jmin(2.0f, strokeThickness * 1.4f);
+    const float arm = juce::jlimit(5.0f, 10.5f, rect.getHeight() * 0.31f);
+    const float corner = juce::jmin(2.2f, strokeThickness * 1.45f);
 
     juce::Path leftBracket;
     leftBracket.startNewSubPath(rect.getX() + arm, rect.getY());
@@ -190,7 +218,7 @@ void EngineeredDepthTheme::drawBracketReadout(juce::Graphics& g,
 
     g.setFont(font);
     g.setColour(textColour);
-    g.drawFittedText(text, rect.reduced(arm * 0.6f, 0.0f).toNearestInt(), juce::Justification::centred, 1);
+    g.drawFittedText(text, rect.reduced(arm + 2.5f, 0.0f).toNearestInt(), juce::Justification::centred, 1);
 }
 
 void EngineeredDepthTheme::drawFocusOutline(juce::Graphics& g,

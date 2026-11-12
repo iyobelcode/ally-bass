@@ -5,25 +5,14 @@ namespace AllyGUI
 
 namespace
 {
-void appendWaveRow(juce::Path& p, float y)
+void appendWaveRow(juce::Path& p, float xStart, float xEnd, float y, float controlAmp)
 {
-    // Smooth two-crest wave derived from diepte_water.svg and tuned to approved master proportions
-    p.startNewSubPath(2.0f, y);
-    p.quadraticTo(5.0f, y - 3.4f, 8.0f, y);
-    p.quadraticTo(11.0f, y + 3.4f, 14.0f, y);
-    p.quadraticTo(17.0f, y - 3.4f, 20.0f, y);
-    p.quadraticTo(23.0f, y + 3.4f, 26.0f, y);
-}
-
-void appendWaveRow24(juce::Path& p, float y)
-{
-    // 24x24 harbor wave contour matching haven_dirt_haventje.svg
-    p.startNewSubPath(2.1f, y);
-    p.quadraticTo(4.3f, y - 1.05f, 6.5f, y);
-    p.quadraticTo(8.7f, y + 1.05f, 11.0f, y);
-    p.quadraticTo(13.2f, y - 1.05f, 15.5f, y);
-    p.quadraticTo(17.8f, y + 1.05f, 20.0f, y);
-    p.quadraticTo(21.1f, y - 0.55f, 22.0f, y - 0.25f);
+    const float span = (xEnd - xStart) * 0.25f;
+    p.startNewSubPath(xStart, y);
+    p.quadraticTo(xStart + span * 0.5f, y - controlAmp, xStart + span, y);
+    p.quadraticTo(xStart + span * 1.5f, y + controlAmp, xStart + span * 2.0f, y);
+    p.quadraticTo(xStart + span * 2.5f, y - controlAmp, xStart + span * 3.0f, y);
+    p.quadraticTo(xStart + span * 3.5f, y + controlAmp, xEnd, y);
 }
 } // namespace
 
@@ -34,57 +23,61 @@ juce::Path EngineeredDepthIcons::buildStrokePath(IconId icon, juce::Rectangle<fl
     switch (icon)
     {
         case IconId::DiepteWater:
-            outViewBox = { 0.0f, 0.0f, 28.0f, 26.0f };
-            appendWaveRow(path, 7.0f);
-            appendWaveRow(path, 13.0f);
-            appendWaveRow(path, 19.0f);
+            // Tight horizontal waves tuned to occupy ~36-40% of inner cap diameter in DepthRingLookAndFeel
+            outViewBox = { 0.0f, 0.0f, 28.0f, 16.5f };
+            appendWaveRow(path, 1.5f, 26.5f, 3.8f, 2.75f);
+            appendWaveRow(path, 1.5f, 26.5f, 8.25f, 2.75f);
+            appendWaveRow(path, 1.5f, 26.5f, 12.7f, 2.75f);
             break;
 
         case IconId::PolderPunch:
-            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
-            path.startNewSubPath(2.0f, 10.0f);
-            path.lineTo(15.0f, 3.0f);
-            path.lineTo(22.0f, 5.0f);
-            path.lineTo(9.0f, 12.0f);
-            path.startNewSubPath(2.0f, 15.0f);
-            path.lineTo(15.0f, 8.0f);
-            path.startNewSubPath(8.0f, 19.0f);
-            path.lineTo(20.0f, 8.0f);
-            path.startNewSubPath(14.0f, 21.0f);
-            path.lineTo(22.0f, 12.0f);
+            // Perspective parallel polder/akkerlijnen receding to horizontal ridge (tight viewBox matching cap span)
+            outViewBox = { 0.0f, 0.0f, 26.0f, 12.0f };
+            path.startNewSubPath(9.6f, 2.2f);
+            path.lineTo(24.0f, 2.2f);
+            for (int i = 0; i < 5; ++i)
+            {
+                const float topX = 9.6f + static_cast<float>(i) * 3.6f;
+                const float botX = 2.0f + static_cast<float>(i) * 3.6f;
+                path.startNewSubPath(botX, 9.8f);
+                path.lineTo(topX, 2.2f);
+            }
             break;
 
         case IconId::HavenDirt:
-            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
-            appendWaveRow24(path, 19.0f);
-            appendWaveRow24(path, 21.3f);
+            outViewBox = { 0.0f, 0.0f, 24.0f, 22.0f };
+            appendWaveRow(path, 2.0f, 22.2f, 18.0f, 1.65f);
+            appendWaveRow(path, 2.0f, 22.2f, 20.4f, 1.65f);
             break;
 
         case IconId::WaterwijkGlide:
-            outViewBox = { 0.0f, 0.0f, 28.0f, 24.0f };
-            appendWaveRow(path, 16.0f);
-            path.startNewSubPath(3.0f, 12.0f);
-            path.lineTo(5.0f, 12.0f);
-            path.lineTo(5.0f, 10.0f);
-            path.lineTo(8.0f, 10.0f);
-            path.lineTo(8.0f, 12.0f);
-            path.lineTo(10.0f, 12.0f);
-            path.lineTo(10.0f, 5.0f);
-            path.lineTo(14.0f, 5.0f);
-            path.lineTo(14.0f, 12.0f);
-            path.lineTo(17.0f, 12.0f);
-            path.lineTo(17.0f, 9.0f);
-            path.lineTo(19.0f, 9.0f);
-            path.lineTo(19.0f, 12.0f);
-            path.lineTo(22.0f, 12.0f);
+            outViewBox = { 0.0f, 0.0f, 28.0f, 18.0f };
+            appendWaveRow(path, 2.0f, 26.0f, 14.4f, 1.85f);
+            path.startNewSubPath(4.2f, 11.4f);
+            path.lineTo(6.2f, 11.4f);
+            path.lineTo(6.2f, 9.2f);
+            path.lineTo(8.8f, 9.2f);
+            path.lineTo(8.8f, 11.0f);
+            path.lineTo(10.8f, 11.0f);
+            path.lineTo(10.8f, 7.6f);
+            path.lineTo(12.6f, 7.6f);
+            path.lineTo(12.6f, 3.6f);
+            path.lineTo(15.4f, 3.6f);
+            path.lineTo(15.4f, 10.6f);
+            path.lineTo(17.5f, 10.6f);
+            path.lineTo(17.5f, 7.6f);
+            path.lineTo(20.4f, 7.6f);
+            path.lineTo(20.4f, 11.2f);
+            path.lineTo(23.8f, 11.2f);
             break;
 
         case IconId::OutputBars:
-            outViewBox = { 0.0f, 0.0f, 28.0f, 24.0f };
-            path.addRoundedRectangle(3.0f, 15.0f, 3.2f, 4.0f, 0.6f);
-            path.addRoundedRectangle(9.0f, 12.0f, 3.2f, 7.0f, 0.6f);
-            path.addRoundedRectangle(15.0f, 8.0f, 3.2f, 11.0f, 0.6f);
-            path.addRoundedRectangle(21.0f, 4.0f, 3.2f, 15.0f, 0.6f);
+            outViewBox = { 0.0f, 0.0f, 26.0f, 18.0f };
+            path.addRoundedRectangle(2.6f,  11.8f, 2.8f, 4.2f,  0.55f);
+            path.addRoundedRectangle(6.9f,  9.6f,  2.8f, 6.4f,  0.55f);
+            path.addRoundedRectangle(11.2f, 7.4f,  2.8f, 8.6f,  0.55f);
+            path.addRoundedRectangle(15.5f, 5.0f,  2.8f, 11.0f, 0.55f);
+            path.addRoundedRectangle(19.8f, 2.4f,  2.8f, 13.6f, 0.55f);
             break;
 
         case IconId::None:
@@ -125,53 +118,70 @@ void EngineeredDepthIcons::drawIcon(juce::Graphics& g,
     {
         if (glowAlpha > 0.01f)
         {
-            g.setColour(primaryColour.withAlpha(glowAlpha * 0.6f));
-            g.strokePath(path, juce::PathStrokeType(strokeThickness * 1.8f), viewTransform);
+            g.setColour(primaryColour.withAlpha(glowAlpha * 0.45f));
+            g.strokePath(path, juce::PathStrokeType(strokeThickness * 1.6f), viewTransform);
         }
-        g.setColour(primaryColour);
+
+        const auto transformedBounds = path.getBounds().transformedBy(viewTransform);
+        juce::ColourGradient barGrad(secondaryColour,
+                                     transformedBounds.getCentreX(), transformedBounds.getY(),
+                                     primaryColour.darker(0.18f),
+                                     transformedBounds.getCentreX(), transformedBounds.getBottom(),
+                                     false);
+        g.setGradientFill(barGrad);
         g.fillPath(path, viewTransform);
         return;
     }
 
     if (icon == IconId::HavenDirt)
     {
-        juce::Path upperBoatAndPier;
-        upperBoatAndPier.startNewSubPath(6.8f, 3.8f);
-        upperBoatAndPier.lineTo(6.8f, 13.2f);
-        upperBoatAndPier.startNewSubPath(6.1f, 5.2f);
-        upperBoatAndPier.lineTo(3.4f, 12.5f);
-        upperBoatAndPier.lineTo(6.1f, 12.5f);
-        upperBoatAndPier.closeSubPath();
-        upperBoatAndPier.startNewSubPath(7.5f, 6.4f);
-        upperBoatAndPier.lineTo(10.5f, 12.5f);
-        upperBoatAndPier.lineTo(7.5f, 12.5f);
-        upperBoatAndPier.closeSubPath();
-        upperBoatAndPier.startNewSubPath(2.3f, 14.1f);
-        upperBoatAndPier.lineTo(11.7f, 14.1f);
-        upperBoatAndPier.lineTo(9.7f, 17.1f);
-        upperBoatAndPier.lineTo(4.8f, 17.1f);
-        upperBoatAndPier.closeSubPath();
-        upperBoatAndPier.startNewSubPath(13.4f, 14.2f);
-        upperBoatAndPier.lineTo(22.0f, 14.2f);
-        upperBoatAndPier.startNewSubPath(15.2f, 10.5f);
-        upperBoatAndPier.lineTo(15.2f, 17.0f);
-        upperBoatAndPier.startNewSubPath(21.0f, 11.3f);
-        upperBoatAndPier.lineTo(21.0f, 17.0f);
-        upperBoatAndPier.startNewSubPath(14.9f, 10.5f);
-        upperBoatAndPier.lineTo(21.4f, 10.5f);
+        // Shared single thin mast (no double vertical inner sail strokes blurring together)
+        juce::Path thinMast;
+        thinMast.startNewSubPath(6.8f, 2.2f);
+        thinMast.lineTo(6.8f, 12.6f);
 
-        const auto thinStroke = juce::PathStrokeType(strokeThickness * 0.90f,
-                                                     juce::PathStrokeType::curved,
-                                                     juce::PathStrokeType::rounded);
+        juce::Path upperBoatAndPier;
+        // Left jib outer + bottom + right mainsail outer + bottom (meeting cleanly at mast)
+        upperBoatAndPier.startNewSubPath(6.8f, 3.6f);
+        upperBoatAndPier.lineTo(3.3f, 11.4f);
+        upperBoatAndPier.lineTo(6.8f, 11.4f);
+        upperBoatAndPier.startNewSubPath(6.8f, 4.8f);
+        upperBoatAndPier.lineTo(10.5f, 11.4f);
+        upperBoatAndPier.lineTo(6.8f, 11.4f);
+
+        // Boat hull
+        upperBoatAndPier.startNewSubPath(2.2f, 13.0f);
+        upperBoatAndPier.lineTo(11.6f, 13.0f);
+        upperBoatAndPier.lineTo(9.8f, 15.8f);
+        upperBoatAndPier.lineTo(4.1f, 15.8f);
+        upperBoatAndPier.closeSubPath();
+
+        // Small harbor jetty/pier (no crane)
+        upperBoatAndPier.startNewSubPath(13.8f, 9.2f);
+        upperBoatAndPier.lineTo(21.5f, 9.2f);
+        upperBoatAndPier.startNewSubPath(15.0f, 9.2f);
+        upperBoatAndPier.lineTo(15.0f, 15.8f);
+        upperBoatAndPier.startNewSubPath(20.3f, 9.2f);
+        upperBoatAndPier.lineTo(20.3f, 15.8f);
+        upperBoatAndPier.startNewSubPath(13.1f, 12.9f);
+        upperBoatAndPier.lineTo(21.7f, 12.9f);
+
+        const auto sceneStroke = juce::PathStrokeType(strokeThickness * 0.92f,
+                                                      juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded);
+        const auto mastStroke  = juce::PathStrokeType(juce::jmax(0.85f, strokeThickness * 0.72f),
+                                                      juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded);
         if (glowAlpha > 0.01f)
         {
-            g.setColour(primaryColour.withAlpha(glowAlpha * 0.5f));
-            g.strokePath(path, juce::PathStrokeType(strokeThickness * 2.1f), viewTransform);
+            g.setColour(primaryColour.withAlpha(glowAlpha * 0.48f));
+            g.strokePath(path, juce::PathStrokeType(strokeThickness * 2.0f), viewTransform);
         }
         g.setColour(secondaryColour);
-        g.strokePath(upperBoatAndPier, thinStroke, viewTransform);
+        g.strokePath(upperBoatAndPier, sceneStroke, viewTransform);
+        g.strokePath(thinMast, mastStroke, viewTransform);
         g.setColour(primaryColour);
-        g.strokePath(path, thinStroke, viewTransform);
+        g.strokePath(path, sceneStroke, viewTransform);
         return;
     }
 
