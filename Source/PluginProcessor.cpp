@@ -18,9 +18,17 @@ AllyBassAudioProcessor::AllyBassAudioProcessor()
 #endif
 {
     visualizerBuffer.fill(0.0f);
+    apvts.state.addListener(this);
+    for (const auto& id : AllyPresets::getAllParameterIds())
+        apvts.addParameterListener(id, this);
 }
 
-AllyBassAudioProcessor::~AllyBassAudioProcessor() = default;
+AllyBassAudioProcessor::~AllyBassAudioProcessor()
+{
+    for (const auto& id : AllyPresets::getAllParameterIds())
+        apvts.removeParameterListener(id, this);
+    apvts.state.removeListener(this);
+}
 
 juce::AudioProcessorValueTreeState::ParameterLayout AllyBassAudioProcessor::createParameterLayout()
 {
@@ -118,10 +126,22 @@ int AllyBassAudioProcessor::getNumPrograms()
     return static_cast<int>(AllyPresets::getFactoryPresets().size());
 }
 
-int AllyBassAudioProcessor::getCurrentProgram() { return 0; }
+int AllyBassAudioProcessor::getCurrentProgram()
+{
+    return juce::jlimit(0, juce::jmax(1, getNumPrograms()) - 1, currentProgramAtomic.load(std::memory_order_acquire));
+}
+
 void AllyBassAudioProcessor::setCurrentProgram(int index)
 {
+    const int numPrograms = getNumPrograms();
+    if (index < 0 || index >= numPrograms)
+        return;
+
+    suppressParamModifiedAtomic.store(true, std::memory_order_release);
     AllyPresets::applyPreset(apvts, index);
+    currentProgramAtomic.store(index, std::memory_order_release);
+    presetModifiedAtomic.store(false, std::memory_order_release);
+    suppressParamModifiedAtomic.store(false, std::memory_order_release);
 }
 
 const juce::String AllyBassAudioProcessor::getProgramName(int index)
@@ -412,8 +432,18 @@ bool AllyBassAudioProcessor::hasEditor() const { return true; }
 void AllyBassAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
-    std::unique_ptr<juce::XmlElement> xml(state.createXml());
-    copyXmlToBinary(*xml, destData);
+    const auto info = getPresetStateInfo();
+    AllyPresets::writePresetMetadata(state,
+                                     info.kind,
+                                     info.factoryIndex,
+                                     info.displayName,
+                                     info.filePath,
+                                     info.modified);
+    state.removeProperty(AllyPresets::propPresetApplying, nullptr);
+    state.removeProperty(AllyPresets::propPresetRevision, nullptr);
+
+    if (std::unique_ptr<juce::XmlElement> xml = state.createXml())
+        copyXmlToBinary(*xml, destData);
 }
 
 void AllyBassAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -421,7 +451,157 @@ void AllyBassAudioProcessor::setStateInformation(const void* data, int sizeInByt
     std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
     if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
     {
-        apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
+        auto restoredTree = juce::ValueTree::fromXml(*xmlState);
+        if (!restoredTree.isValid())
+            return;
+
+        const bool hadMetadata = restoredTree.hasProperty(AllyPresets::propPresetKind);
+        const auto info = hadMetadata
+            ? AllyPresets::readPresetMetadata(restoredTree)
+            : AllyPresets::PresetStateInfo { AllyPresets::PresetKind::Init, -1, "Custom", {}, false };
+
+        suppressParamModifiedAtomic.store(true, std::memory_order_release);
+        apvts.state.setProperty(AllyPresets::propPresetApplying, true, nullptr);
+        apvts.replaceState(restoredTree);
+        AllyPresets::writePresetMetadata(apvts.state,
+                                         info.kind,
+                                         info.factoryIndex,
+                                         info.displayName,
+                                         info.filePath,
+                                         info.modified);
+        AllyPresets::bumpPresetRevision(apvts.state);
+        apvts.state.setProperty(AllyPresets::propPresetApplying, false, nullptr);
+
+        presetModifiedAtomic.store(info.modified, std::memory_order_release);
+        if (info.kind == AllyPresets::PresetKind::Factory
+            && info.factoryIndex >= 0
+            && info.factoryIndex < getNumPrograms())
+        {
+            currentProgramAtomic.store(info.factoryIndex, std::memory_order_release);
+        }
+        else
+        {
+            currentProgramAtomic.store(0, std::memory_order_release);
+        }
+        suppressParamModifiedAtomic.store(false, std::memory_order_release);
+    }
+}
+
+AllyPresets::PresetStateInfo AllyBassAudioProcessor::getPresetStateInfo() const
+{
+    return AllyPresets::readPresetMetadata(apvts.state,
+                                           presetModifiedAtomic.load(std::memory_order_acquire),
+                                           true);
+}
+
+void AllyBassAudioProcessor::selectRelativeFactoryPreset(int delta)
+{
+    const int count = getNumPrograms();
+    if (count <= 0)
+        return;
+
+    const auto info = getPresetStateInfo();
+    int nextIndex = 0;
+    if (info.kind == AllyPresets::PresetKind::Factory && info.factoryIndex >= 0)
+    {
+        nextIndex = AllyPresets::wrapPresetIndex(info.factoryIndex + delta, count);
+    }
+    else
+    {
+        nextIndex = (delta >= 0)
+            ? AllyPresets::wrapPresetIndex(delta - 1, count)
+            : AllyPresets::wrapPresetIndex(delta, count);
+    }
+
+    setCurrentProgram(nextIndex);
+    updateHostDisplay();
+}
+
+bool AllyBassAudioProcessor::loadUserPresetFromFile(const juce::File& file, juce::String& outError)
+{
+    juce::String loadedName;
+    suppressParamModifiedAtomic.store(true, std::memory_order_release);
+    const bool ok = AllyPresets::loadPresetFromFile(apvts, file, loadedName, outError);
+    if (ok)
+    {
+        presetModifiedAtomic.store(false, std::memory_order_release);
+        currentProgramAtomic.store(0, std::memory_order_release);
+        updateHostDisplay();
+    }
+    suppressParamModifiedAtomic.store(false, std::memory_order_release);
+    return ok;
+}
+
+bool AllyBassAudioProcessor::saveUserPresetToFile(const juce::File& file,
+                                                  const juce::String& presetName,
+                                                  bool allowOverwrite,
+                                                  juce::String& outError)
+{
+#ifdef JucePlugin_VersionString
+    const juce::String pluginVer(JucePlugin_VersionString);
+#else
+    const juce::String pluginVer("1.0.0");
+#endif
+
+    suppressParamModifiedAtomic.store(true, std::memory_order_release);
+    const bool ok = AllyPresets::savePresetToFile(apvts,
+                                                  file,
+                                                  presetName,
+                                                  allowOverwrite,
+                                                  outError,
+                                                  pluginVer);
+    if (ok)
+    {
+        presetModifiedAtomic.store(false, std::memory_order_release);
+        currentProgramAtomic.store(0, std::memory_order_release);
+        updateHostDisplay();
+    }
+    suppressParamModifiedAtomic.store(false, std::memory_order_release);
+    return ok;
+}
+
+void AllyBassAudioProcessor::parameterChanged(const juce::String&, float)
+{
+    if (!suppressParamModifiedAtomic.load(std::memory_order_acquire))
+        presetModifiedAtomic.store(true, std::memory_order_release);
+}
+
+void AllyBassAudioProcessor::valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged,
+                                                      const juce::Identifier& property)
+{
+    if (treeWhosePropertyHasChanged != apvts.state)
+        return;
+
+    if (property == AllyPresets::propPresetApplying)
+    {
+        const bool applying = static_cast<bool>(treeWhosePropertyHasChanged.getProperty(AllyPresets::propPresetApplying, false));
+        suppressParamModifiedAtomic.store(applying, std::memory_order_release);
+        if (!applying)
+        {
+            const auto info = AllyPresets::readPresetMetadata(treeWhosePropertyHasChanged);
+            presetModifiedAtomic.store(info.modified, std::memory_order_release);
+            if (info.kind == AllyPresets::PresetKind::Factory
+                && info.factoryIndex >= 0
+                && info.factoryIndex < getNumPrograms())
+            {
+                currentProgramAtomic.store(info.factoryIndex, std::memory_order_release);
+            }
+        }
+    }
+    else if (property == AllyPresets::propPresetModified)
+    {
+        presetModifiedAtomic.store(static_cast<bool>(treeWhosePropertyHasChanged.getProperty(AllyPresets::propPresetModified, false)),
+                                   std::memory_order_release);
+    }
+    else if (property == AllyPresets::propPresetIndex)
+    {
+        const auto info = AllyPresets::readPresetMetadata(treeWhosePropertyHasChanged);
+        if (info.kind == AllyPresets::PresetKind::Factory
+            && info.factoryIndex >= 0
+            && info.factoryIndex < getNumPrograms())
+        {
+            currentProgramAtomic.store(info.factoryIndex, std::memory_order_release);
+        }
     }
 }
 

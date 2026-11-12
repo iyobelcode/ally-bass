@@ -9,8 +9,11 @@
 #include "DSP/WaterwijkGlide.h"
 #include "DSP/MonoLockFilter.h"
 #include "DSP/Overdrive036.h"
+#include "Presets/PresetManager.h"
 
-class AllyBassAudioProcessor : public juce::AudioProcessor
+class AllyBassAudioProcessor : public juce::AudioProcessor,
+                               private juce::AudioProcessorValueTreeState::Listener,
+                               private juce::ValueTree::Listener
 {
 public:
     AllyBassAudioProcessor();
@@ -41,6 +44,15 @@ public:
 
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
+
+    // Preset & State Management API (message thread)
+    AllyPresets::PresetStateInfo getPresetStateInfo() const;
+    void selectRelativeFactoryPreset(int delta);
+    bool loadUserPresetFromFile(const juce::File& file, juce::String& outError);
+    bool saveUserPresetToFile(const juce::File& file,
+                              const juce::String& presetName,
+                              bool allowOverwrite,
+                              juce::String& outError);
 
     // APVTS
     juce::AudioProcessorValueTreeState apvts;
@@ -84,6 +96,15 @@ private:
 
     void handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount);
     void updateEnvelopeRates(float attackMs, float releaseMs);
+
+    // APVTS & ValueTree listeners for lock-free parameter edit / preset modified tracking
+    void parameterChanged(const juce::String& parameterID, float newValue) override;
+    void valueTreePropertyChanged(juce::ValueTree& treeWhosePropertyHasChanged,
+                                  const juce::Identifier& property) override;
+
+    std::atomic<int> currentProgramAtomic { 0 };
+    std::atomic<bool> presetModifiedAtomic { false };
+    std::atomic<bool> suppressParamModifiedAtomic { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AllyBassAudioProcessor)
 };

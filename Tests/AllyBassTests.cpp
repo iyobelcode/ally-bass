@@ -16,6 +16,9 @@
 #include "GUI/HeavyKnob.h"
 #include "GUI/PrimaryKnobsPanel.h"
 #include "GUI/SecondaryDspPanel.h"
+#include "GUI/HeaderPanel.h"
+#include "GUI/SettingsOverlay.h"
+#include "GUI/SavePresetOverlay.h"
 
 #include <cmath>
 #include <vector>
@@ -1454,6 +1457,357 @@ static ParameterAndStateTests parameterAndStateTests;
 static MidiGlideAndAudioTests midiGlideAndAudioTests;
 static PolderPunchTests polderPunchTests;
 static EngineeredDepthTests engineeredDepthTests;
+
+class HeaderBrandingAndPresetTests final : public juce::UnitTest
+{
+public:
+    HeaderBrandingAndPresetTests() : juce::UnitTest("Header Branding & Preset Management (C.4A)", "AllyBass") {}
+
+    void runTest() override
+    {
+        beginTest("All 14 factory presets and circular wrap navigation (14 -> 1 and 1 -> 14)");
+        {
+            AllyBassAudioProcessor proc;
+            expectEquals(proc.getNumPrograms(), 14);
+            expectEquals(proc.getPresetStateInfo().displayName, juce::String("Init"));
+
+            // Step forward through Init -> 01..14 -> wraps back to 01
+            proc.selectRelativeFactoryPreset(+1);
+            expectEquals(proc.getCurrentProgram(), 0);
+            expectEquals(proc.getPresetStateInfo().displayName, juce::String("01_Kasteel_Drill_Slide"));
+
+            for (int step = 0; step < 13; ++step)
+                proc.selectRelativeFactoryPreset(+1);
+
+            expectEquals(proc.getCurrentProgram(), 13);
+            expectEquals(proc.getPresetStateInfo().displayName, juce::String("14_42GRAM_Club_Banger"));
+
+            proc.selectRelativeFactoryPreset(+1);
+            expectEquals(proc.getCurrentProgram(), 0);
+            expectEquals(proc.getPresetStateInfo().displayName, juce::String("01_Kasteel_Drill_Slide"));
+
+            // Step backward 01 -> wraps to 14
+            proc.selectRelativeFactoryPreset(-1);
+            expectEquals(proc.getCurrentProgram(), 13);
+            expectEquals(proc.getPresetStateInfo().displayName, juce::String("14_42GRAM_Club_Banger"));
+
+            // Same circular behavior through UI HeaderPanel Prev/Next buttons
+            std::unique_ptr<juce::AudioProcessorEditor> baseEditor(proc.createEditor());
+            auto* editor = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEditor.get());
+            expect(editor != nullptr);
+            if (editor != nullptr && editor->getHeaderPanel() != nullptr)
+            {
+                auto* hdr = editor->getHeaderPanel();
+                expect(hdr->getNextButton().onClick != nullptr, "Next button must wire circular preset handler");
+                expect(hdr->getPrevButton().onClick != nullptr, "Prev button must wire circular preset handler");
+
+                hdr->getNextButton().onClick();
+                expectEquals(proc.getCurrentProgram(), 0);
+                expectEquals(hdr->getDisplayedPresetText(), juce::String("01_Kasteel_Drill_Slide"));
+
+                hdr->getPrevButton().onClick();
+                expectEquals(proc.getCurrentProgram(), 13);
+                expectEquals(hdr->getDisplayedPresetText(), juce::String("14_42GRAM_Club_Banger"));
+            }
+        }
+
+        beginTest("Modified indicator on manual parameter edit keeps factory preset immutable");
+        {
+            const auto& presets = AllyPresets::getFactoryPresets();
+            const juce::String preset4Name = presets[3].name;
+            const float originalPreset4Diepte = presets[3].diepte;
+
+            AllyBassAudioProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> baseEditor(proc.createEditor());
+            auto* editor = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEditor.get());
+            expect(editor != nullptr && editor->getHeaderPanel() != nullptr);
+
+            proc.setCurrentProgram(3);
+            if (editor != nullptr && editor->getHeaderPanel() != nullptr)
+            {
+                auto* hdr = editor->getHeaderPanel();
+                hdr->refreshFromProcessor();
+                expectEquals(proc.getCurrentProgram(), 3);
+                expect(!proc.getPresetStateInfo().modified, "Newly loaded preset must not be modified");
+                expectEquals(hdr->getDisplayedPresetText(), preset4Name);
+
+                std::vector<AllyPresets::UserPresetEntry> userEntries;
+                auto menu = hdr->buildPresetPopupMenu(userEntries);
+                expect(menu != nullptr && menu->getNumItems() >= 14, "Popup menu must include all 14 factory presets");
+
+                setParamPlainValue(proc.apvts, "diepte", 0.93f);
+                expect(proc.getPresetStateInfo().modified, "Parameter edit must flag preset modified");
+                expectEquals(hdr->getDisplayedPresetText(), preset4Name + " *");
+                expectWithinAbsoluteError(AllyPresets::getFactoryPresets()[3].diepte, originalPreset4Diepte, 1e-6f);
+            }
+        }
+
+        beginTest("User .allypreset save, overwrite protection, corrupt rejection, and reload");
+        {
+            const auto tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                     .getChildFile("ally1300_c4a_test_" + juce::String(juce::Time::currentTimeMillis()));
+            tempDir.createDirectory();
+
+            struct TempDirGuard
+            {
+                juce::File dir;
+                ~TempDirGuard() { dir.deleteRecursively(); }
+            } cleanup { tempDir };
+
+            AllyBassAudioProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> baseEditor(proc.createEditor());
+            auto* editor = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEditor.get());
+            expect(editor != nullptr && editor->getSavePresetOverlay() != nullptr);
+
+            setParamPlainValue(proc.apvts, "diepte", 0.77f);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.42f);
+            setParamPlainValue(proc.apvts, "havenDirt", 0.61f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 215.0f);
+            setParamPlainValue(proc.apvts, "masterVolume", -4.5f);
+            setParamPlainValue(proc.apvts, "attack", 16.5f);
+            setParamPlainValue(proc.apvts, "release", 680.0f);
+            setParamPlainValue(proc.apvts, "stadsdeel", 2.0f);
+            setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+            setParamPlainValue(proc.apvts, "monoLock1300", 0.0f);
+
+            // Reject factory preset names & empty names
+            juce::String err;
+            expect(!proc.saveUserPresetToFile(tempDir.getChildFile("Bad.allypreset"), "", false, err));
+            expect(!proc.saveUserPresetToFile(tempDir.getChildFile("01_Kasteel_Drill_Slide.allypreset"),
+                                              "01_Kasteel_Drill_Slide", false, err));
+
+            if (editor != nullptr && editor->getSavePresetOverlay() != nullptr)
+            {
+                auto* saveModal = editor->getSavePresetOverlay();
+                saveModal->prepareForSave(proc.getPresetStateInfo());
+                saveModal->setTargetDirectory(tempDir);
+
+                // Reject empty name in modal
+                saveModal->getNameEditor().setText("   ", juce::dontSendNotification);
+                expect(!saveModal->attemptSave(), "Blank name must be rejected");
+
+                // Reject factory name in modal
+                saveModal->getNameEditor().setText("01_Kasteel_Drill_Slide", juce::dontSendNotification);
+                expect(!saveModal->attemptSave(), "Factory preset name must be protected");
+
+                // Valid save to custom user preset file
+                saveModal->getNameEditor().setText("Almere_Test_Sub", juce::dontSendNotification);
+                expect(saveModal->attemptSave(), "First user preset save must succeed");
+
+                const auto savedFile = tempDir.getChildFile("Almere_Test_Sub.allypreset");
+                expect(savedFile.existsAsFile(), ".allypreset file must be created on disk");
+
+                // Modify a parameter and verify first attempt to save under same name stops for overwrite confirmation
+                setParamPlainValue(proc.apvts, "masterVolume", -1.5f);
+                saveModal->prepareForSave(proc.getPresetStateInfo());
+                saveModal->setTargetDirectory(tempDir);
+                saveModal->getNameEditor().setText("Almere_Test_Sub", juce::dontSendNotification);
+                expect(!saveModal->attemptSave(), "Existing file must require overwrite confirmation");
+                expect(saveModal->isOverwritePending(), "Overwrite pending state must activate");
+                expectEquals(saveModal->getSaveButton().getButtonText(), juce::String("OVERSCHRIJVEN"));
+
+                // Second attempt confirms explicit overwrite
+                expect(saveModal->attemptSave(), "Confirmed overwrite must succeed");
+                expect(!saveModal->isOverwritePending(), "Overwrite pending state must clear after save");
+
+                // Corrupt file & wrong schema rejection leaves processor parameters untouched
+                const auto badFile = tempDir.getChildFile("Corrupt.allypreset");
+                badFile.replaceWithText("<ALLY1300Preset schemaVersion=\"99\"><Meta name=\"Bad\"/></ALLY1300Preset>");
+                expect(!proc.loadUserPresetFromFile(badFile, err), "Unsupported schemaVersion must fail");
+                expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "masterVolume"), -1.5f, 0.11f);
+
+                // Reset processor to different preset then load saved .allypreset back
+                proc.setCurrentProgram(0);
+                expect(proc.loadUserPresetFromFile(savedFile, err), "Valid .allypreset must load cleanly");
+
+                expectEquals(static_cast<int>(proc.getPresetStateInfo().kind),
+                             static_cast<int>(AllyPresets::PresetKind::User));
+                expectEquals(proc.getPresetStateInfo().displayName, juce::String("Almere_Test_Sub"));
+                expect(!proc.getPresetStateInfo().modified, "Freshly loaded user preset must clear modified flag");
+                expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "diepte"), 0.77f, 0.011f);
+                expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "waterwijkGlide"), 215.0f, 0.51f);
+                expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "masterVolume"), -1.5f, 0.11f);
+                expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "stadsdeel"), 2.0f, 1e-4f);
+                expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "monoLock1300"), 0.0f, 1e-4f);
+                if (editor->getHeaderPanel() != nullptr)
+                    expectEquals(editor->getHeaderPanel()->getDisplayedPresetText(), juce::String("Almere_Test_Sub"));
+            }
+        }
+
+        beginTest("DAW state and editor close/reopen preserve parameters and preset metadata");
+        {
+            const juce::String preset7Name = AllyPresets::getFactoryPresets()[6].name;
+            juce::MemoryBlock stateBlock;
+            {
+                AllyBassAudioProcessor procA;
+                procA.setCurrentProgram(6);
+                setParamPlainValue(procA.apvts, "havenDirt", 0.88f);
+                setParamPlainValue(procA.apvts, "masterVolume", 1.8f);
+
+                std::unique_ptr<juce::AudioProcessorEditor> edA(procA.createEditor());
+                edA.reset(); // Close editor before DAW state save
+
+                procA.getStateInformation(stateBlock);
+            }
+
+            AllyBassAudioProcessor procB;
+            procB.setStateInformation(stateBlock.getData(), static_cast<int>(stateBlock.getSize()));
+
+            expectEquals(procB.getCurrentProgram(), 6);
+            expectEquals(procB.getPresetStateInfo().displayName, preset7Name);
+            expect(procB.getPresetStateInfo().modified, "Modified state must survive DAW save/restore");
+            expectWithinAbsoluteError(getParamPlainValue(procB.apvts, "havenDirt"), 0.88f, 0.011f);
+            expectWithinAbsoluteError(getParamPlainValue(procB.apvts, "masterVolume"), 1.8f, 0.11f);
+
+            // Reopening editor repeatedly must NEVER reset parameters to Preset 1
+            for (int openIdx = 0; openIdx < 2; ++openIdx)
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> baseEdB(procB.createEditor());
+                auto* edB = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEdB.get());
+                expect(edB != nullptr && edB->getHeaderPanel() != nullptr);
+                if (edB != nullptr && edB->getHeaderPanel() != nullptr)
+                {
+                    expectEquals(edB->getHeaderPanel()->getDisplayedPresetText(),
+                                 preset7Name + " *");
+                }
+                expectWithinAbsoluteError(getParamPlainValue(procB.apvts, "havenDirt"), 0.88f, 0.011f);
+                expectWithinAbsoluteError(getParamPlainValue(procB.apvts, "masterVolume"), 1.8f, 0.11f);
+            }
+        }
+
+        beginTest("Settings/Save modals prevent stuck MIDI/QWERTY notes and processBlock stays finite");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setRateAndBufferSizeDetails(48000.0, 256);
+            proc.prepareToPlay(48000.0, 256);
+
+            std::unique_ptr<juce::AudioProcessorEditor> baseEd(proc.createEditor());
+            auto* ed = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEd.get());
+            expect(ed != nullptr);
+
+            if (ed != nullptr)
+            {
+                proc.getKeyboardState().noteOn(1, 36, 0.9f);
+                expect(proc.getKeyboardState().isNoteOn(1, 36), "Note 36 should be active before modal opens");
+
+                ed->openSettingsModal();
+                expect(ed->isModalOverlayVisible(), "Settings overlay must become visible");
+                expect(!proc.getKeyboardState().isNoteOn(1, 36),
+                       "Opening Settings must release pressed notes cleanly");
+
+                // Audio buffer remains finite while presets change cleanly outside audio thread
+                juce::AudioBuffer<float> audioBuf(2, 256);
+                juce::MidiBuffer midiBuf;
+                audioBuf.clear();
+                proc.setCurrentProgram(2);
+                proc.processBlock(audioBuf, midiBuf);
+                expect(bufferPeak(audioBuf) >= 0.0f, "Processed audio samples must remain finite");
+
+                ed->closeModalOverlays();
+                expect(!ed->isModalOverlayVisible(), "Closing modal must hide overlays cleanly");
+
+                proc.getKeyboardState().noteOn(1, 40, 0.9f);
+                ed->openSavePresetModal();
+                expect(!proc.getKeyboardState().isNoteOn(1, 40),
+                       "Opening Save modal must release pressed notes cleanly");
+                ed->closeModalOverlays();
+            }
+        }
+
+        beginTest("Emblem wave mirror symmetry, exact toolbar order, responsive fit & HiDPI");
+        {
+            // Verify strict mathematical X-mirror symmetry of A-emblem & double waves
+            juce::Path chevA, upWave, lowL, lowR;
+            const juce::Rectangle<float> testBox(10.0f, 10.0f, 60.0f, 52.0f);
+            AllyGUI::HeaderPanel::buildEmblemPaths(testBox, chevA, upWave, lowL, lowR);
+
+            const float cx = testBox.getCentreX();
+            const float chevLeftDist  = cx - chevA.getBounds().getX();
+            const float chevRightDist = chevA.getBounds().getRight() - cx;
+            expectWithinAbsoluteError(chevLeftDist, chevRightDist, 0.05f);
+
+            const float upLeftDist  = cx - upWave.getBounds().getX();
+            const float upRightDist = upWave.getBounds().getRight() - cx;
+            expectWithinAbsoluteError(upLeftDist, upRightDist, 0.05f);
+
+            const float lowLeftDist  = cx - lowL.getBounds().getX();
+            const float lowRightDist = lowR.getBounds().getRight() - cx;
+            expectWithinAbsoluteError(lowLeftDist, lowRightDist, 0.05f);
+
+            AllyBassAudioProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> baseEd(proc.createEditor());
+            auto* ed = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEd.get());
+            expect(ed != nullptr && ed->getHeaderPanel() != nullptr);
+
+            if (ed != nullptr && ed->getHeaderPanel() != nullptr)
+            {
+                auto* hdr = ed->getHeaderPanel();
+                const juce::Point<int> sizes[] = { { 680, 500 }, { 780, 580 }, { 1200, 850 } };
+                for (const auto& sz : sizes)
+                {
+                    ed->setSize(sz.x, sz.y);
+
+                    const auto chassis = hdr->getChassisBounds();
+                    expect(!chassis.isEmpty(), "Header chassis bounds must not be empty");
+                    expect(chassis.contains(hdr->getEmblemBounds()), "Emblem must fit inside header chassis");
+                    expect(chassis.contains(hdr->getWordmarkBounds()), "Wordmark must fit inside header chassis");
+                    expect(chassis.contains(hdr->getLocationBounds()), "Location stack must fit inside header chassis");
+                    expect(chassis.contains(hdr->getToolbarBounds()), "Toolbar must fit inside header chassis");
+
+                    expect(hdr->getEmblemBounds().getRight() < hdr->getWordmarkBounds().getX());
+                    expect(hdr->getWordmarkBounds().getRight() < hdr->getLocationBounds().getX());
+                    expect(hdr->getLocationBounds().getRight() <= hdr->getMapBounds().getX());
+                    expect(hdr->getMapBounds().getRight() <= hdr->getToolbarBounds().getX());
+                    expect(hdr->getMapBounds().getWidth() >= 38.0f, "Almere map window must remain visible");
+
+                    // Exact toolbar order: < | > | Preset | Open | Save | Settings
+                    const juce::Component* toolbarOrder[6] = {
+                        &hdr->getPrevButton(),
+                        &hdr->getNextButton(),
+                        &hdr->getPresetButton(),
+                        &hdr->getOpenButton(),
+                        &hdr->getSaveButton(),
+                        &hdr->getSettingsButton()
+                    };
+                    for (int idx = 0; idx < 6; ++idx)
+                    {
+                        expect(hdr->getLocalBounds().contains(toolbarOrder[idx]->getBounds()),
+                               "Toolbar control must not clip");
+                        if (idx > 0)
+                            expect(toolbarOrder[idx - 1]->getRight() <= toolbarOrder[idx]->getX(),
+                                   "Toolbar controls must stay strictly left-to-right without overlap");
+                    }
+
+                    // Overlays fit cleanly even at minimum 680x500 window size
+                    ed->openSettingsModal();
+                    if (auto* so = ed->getSettingsOverlay())
+                        expect(ed->getLocalBounds().contains(so->getPanelBounds()), "Settings panel must fit inside editor");
+                    ed->openSavePresetModal();
+                    if (auto* svo = ed->getSavePresetOverlay())
+                        expect(ed->getLocalBounds().contains(svo->getPanelBounds()), "Save modal must fit inside editor");
+                    ed->closeModalOverlays();
+                }
+
+                ed->setSize(780, 580);
+                const float scales[] = { 1.0f, 1.25f, 1.5f, 2.0f };
+                for (const float scale : scales)
+                {
+                    const int rw = juce::roundToInt(static_cast<float>(hdr->getWidth()) * scale);
+                    const int rh = juce::roundToInt(static_cast<float>(hdr->getHeight()) * scale);
+                    juce::Image img(juce::Image::ARGB, rw, rh, true);
+                    {
+                        juce::Graphics g(img);
+                        g.addTransform(juce::AffineTransform::scale(scale));
+                        hdr->paintEntireComponent(g, true);
+                    }
+                    expect(img.isValid() && img.getWidth() > 0 && img.getHeight() > 0);
+                }
+            }
+        }
+    }
+};
+
+static HeaderBrandingAndPresetTests headerBrandingAndPresetTests;
 
 } // namespace
 

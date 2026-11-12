@@ -66,6 +66,16 @@ set(ALLY_SHARED_SOURCES
     Source/GUI/EngineeredDepthComboBox.cpp
     Source/GUI/EngineeredDepthToggle.h
     Source/GUI/EngineeredDepthToggle.cpp
+    Source/GUI/EngineeredDepthIconButton.h
+    Source/GUI/EngineeredDepthIconButton.cpp
+    Source/GUI/EngineeredDepthModal.h
+    Source/GUI/EngineeredDepthModal.cpp
+    Source/GUI/HeaderPanel.h
+    Source/GUI/HeaderPanel.cpp
+    Source/GUI/SettingsOverlay.h
+    Source/GUI/SettingsOverlay.cpp
+    Source/GUI/SavePresetOverlay.h
+    Source/GUI/SavePresetOverlay.cpp
     Source/GUI/SecondaryDspPanel.h
     Source/GUI/SecondaryDspPanel.cpp
     Source/GUI/NapWaveVisualizer.h
@@ -108,6 +118,7 @@ if(ALLY_BUILD_TESTS)
     )
     target_compile_definitions(AllyBassTests PRIVATE
         JucePlugin_Name="ALLY - 1300 SUB SYNTH"
+        JucePlugin_VersionString="1.0.0"
         JucePlugin_IsSynth=1
         JucePlugin_IsMidiEffect=0
         JUCE_WEB_BROWSER=0

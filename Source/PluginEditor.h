@@ -7,6 +7,9 @@
 #include "GUI/BrutalistLookAndFeel.h"
 #include "GUI/PrimaryKnobsPanel.h"
 #include "GUI/SecondaryDspPanel.h"
+#include "GUI/HeaderPanel.h"
+#include "GUI/SettingsOverlay.h"
+#include "GUI/SavePresetOverlay.h"
 #include "GUI/NapWaveVisualizer.h"
 #include "GUI/HeavyKnob.h"
 #include "GUI/BrutalistToggle.h"
@@ -27,6 +30,16 @@ public:
     void focusLost(juce::Component::FocusChangeType) override;
     void releaseQwertyNotesOnly();
     void releaseAllPressedKeys();
+
+    // Header, Preset & Modal Dialog Accessors (Stap C.4A)
+    AllyGUI::HeaderPanel* getHeaderPanel() const noexcept { return headerPanel.get(); }
+    AllyGUI::SettingsOverlay* getSettingsOverlay() const noexcept { return settingsOverlay.get(); }
+    AllyGUI::SavePresetOverlay* getSavePresetOverlay() const noexcept { return savePresetOverlay.get(); }
+    bool isModalOverlayVisible() const noexcept;
+    void openSettingsModal();
+    void openSavePresetModal();
+    void openUserPresetAsync();
+    void closeModalOverlays();
 
 private:
     AllyBassAudioProcessor& audioProcessor;
@@ -51,11 +64,13 @@ private:
     // Secondary DSP console bar: Stadsdeel DSP, Attack & Release Mini Rings, 036 Overdrive, 1300 Mono Lock (Stap C.3)
     std::unique_ptr<AllyGUI::SecondaryDspPanel> secondaryDspPanel;
 
-    // Preset Selector
-    juce::Label presetLabel;
-    juce::ComboBox presetBox;
+    // Top Engineered Depth Header, Branding & Preset Toolbar (Stap C.4A)
+    std::unique_ptr<AllyGUI::HeaderPanel> headerPanel;
+    std::unique_ptr<AllyGUI::SettingsOverlay> settingsOverlay;
+    std::unique_ptr<AllyGUI::SavePresetOverlay> savePresetOverlay;
+    std::unique_ptr<juce::FileChooser> openPresetChooser;
 
-    void setupPresets();
+    void setupHeaderAndModals();
     void updateKeyboardRange();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AllyBassAudioProcessorEditor)

@@ -1,9 +1,107 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <vector>
+#include <algorithm>
 
 namespace AllyPresets
 {
+
+enum class PresetKind
+{
+    Init = 0,
+    Factory = 1,
+    User = 2
+};
+
+struct PresetStateInfo
+{
+    PresetKind kind = PresetKind::Init;
+    int factoryIndex = -1;
+    juce::String displayName { "Init" };
+    juce::String filePath;
+    bool modified = false;
+
+    bool operator==(const PresetStateInfo& other) const noexcept
+    {
+        return kind == other.kind
+            && factoryIndex == other.factoryIndex
+            && displayName == other.displayName
+            && filePath == other.filePath
+            && modified == other.modified;
+    }
+
+    bool operator!=(const PresetStateInfo& other) const noexcept { return !(*this == other); }
+};
+
+struct UserPresetEntry
+{
+    juce::String name;
+    juce::File file;
+};
+
+inline constexpr int kPresetSchemaVersion = 1;
+inline constexpr const char* kPresetFileExtension = ".allypreset";
+inline constexpr const char* kPresetFileWildcard = "*.allypreset";
+inline constexpr const char* kPresetXmlRootTag = "ALLY1300Preset";
+
+inline const juce::Identifier propPresetKind     { "allyPresetKind" };
+inline const juce::Identifier propPresetIndex    { "allyPresetIndex" };
+inline const juce::Identifier propPresetName     { "allyPresetName" };
+inline const juce::Identifier propPresetPath     { "allyPresetPath" };
+inline const juce::Identifier propPresetModified { "allyPresetModified" };
+inline const juce::Identifier propPresetApplying { "allyPresetApplying" };
+inline const juce::Identifier propPresetRevision { "allyPresetRevision" };
+
+inline const juce::StringArray& getAllParameterIds()
+{
+    static const juce::StringArray ids {
+        "diepte",
+        "polderPunch",
+        "havenDirt",
+        "waterwijkGlide",
+        "masterVolume",
+        "attack",
+        "release",
+        "stadsdeel",
+        "overdrive036",
+        "monoLock1300"
+    };
+    return ids;
+}
+
+inline int wrapPresetIndex(int index, int count) noexcept
+{
+    if (count <= 0)
+        return 0;
+    return ((index % count) + count) % count;
+}
+
+inline juce::File getDefaultUserPresetsDirectory()
+{
+    return juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+        .getChildFile("JUICED UNICORN")
+        .getChildFile("ALLY 1300 SUB SYNTH")
+        .getChildFile("Presets");
+}
+
+inline juce::String sanitizePresetDisplayName(const juce::String& raw)
+{
+    juce::String cleaned = raw.replaceCharacters("\r\n\t", "   ").trim();
+    if (cleaned.length() > 64)
+        cleaned = cleaned.substring(0, 64).trim();
+    return cleaned;
+}
+
+inline juce::String sanitizePresetFilename(const juce::String& raw)
+{
+    auto name = sanitizePresetDisplayName(raw);
+    name = name.replaceCharacters("/\\:*?\"<>|", "_________")
+               .replace("..", "_");
+    while (name.contains("__"))
+        name = name.replace("__", "_");
+    name = name.trimCharactersAtStart(". _").trimCharactersAtEnd(". _");
+    return name.isNotEmpty() ? name : juce::String("User_Preset");
+}
 
 struct Preset
 {
@@ -208,6 +306,88 @@ inline const std::vector<Preset>& getFactoryPresets()
     return presets;
 }
 
+inline bool isFactoryPresetName(const juce::String& candidate)
+{
+    const auto trimmed = sanitizePresetDisplayName(candidate);
+    if (trimmed.isEmpty())
+        return false;
+
+    const auto& presets = getFactoryPresets();
+    for (const auto& p : presets)
+    {
+        if (p.name.equalsIgnoreCase(trimmed))
+            return true;
+    }
+    return false;
+}
+
+inline void writePresetMetadata(juce::ValueTree& stateTree,
+                                PresetKind kind,
+                                int factoryIndex,
+                                const juce::String& name,
+                                const juce::String& filePath,
+                                bool modified)
+{
+    stateTree.setProperty(propPresetKind, static_cast<int>(kind), nullptr);
+    stateTree.setProperty(propPresetIndex, factoryIndex, nullptr);
+    stateTree.setProperty(propPresetName, name, nullptr);
+    stateTree.setProperty(propPresetPath, filePath, nullptr);
+    stateTree.setProperty(propPresetModified, modified, nullptr);
+}
+
+inline PresetStateInfo readPresetMetadata(const juce::ValueTree& stateTree,
+                                          bool modifiedOverride = false,
+                                          bool useModifiedOverride = false)
+{
+    PresetStateInfo info;
+
+    if (!stateTree.hasProperty(propPresetKind))
+    {
+        info.kind = PresetKind::Init;
+        info.factoryIndex = -1;
+        info.displayName = "Init";
+        info.filePath = {};
+        info.modified = useModifiedOverride ? modifiedOverride : false;
+        return info;
+    }
+
+    const int rawKind = static_cast<int>(stateTree.getProperty(propPresetKind, 0));
+    if (rawKind == static_cast<int>(PresetKind::Factory))
+        info.kind = PresetKind::Factory;
+    else if (rawKind == static_cast<int>(PresetKind::User))
+        info.kind = PresetKind::User;
+    else
+        info.kind = PresetKind::Init;
+
+    info.factoryIndex = static_cast<int>(stateTree.getProperty(propPresetIndex, -1));
+    info.displayName = stateTree.getProperty(propPresetName, juce::String("Init")).toString();
+    info.filePath = stateTree.getProperty(propPresetPath, juce::String()).toString();
+    info.modified = useModifiedOverride
+        ? modifiedOverride
+        : static_cast<bool>(stateTree.getProperty(propPresetModified, false));
+
+    if (info.kind == PresetKind::Factory)
+    {
+        const auto& presets = getFactoryPresets();
+        if (info.factoryIndex >= 0 && info.factoryIndex < static_cast<int>(presets.size()))
+            info.displayName = presets[static_cast<size_t>(info.factoryIndex)].name;
+        else
+            info.kind = PresetKind::Init;
+    }
+    else if (info.displayName.isEmpty())
+    {
+        info.displayName = (info.kind == PresetKind::User) ? "User Preset" : "Init";
+    }
+
+    return info;
+}
+
+inline void bumpPresetRevision(juce::ValueTree& stateTree)
+{
+    const int currentRev = static_cast<int>(stateTree.getProperty(propPresetRevision, 0));
+    stateTree.setProperty(propPresetRevision, currentRev + 1, nullptr);
+}
+
 inline void applyPreset(juce::AudioProcessorValueTreeState& apvts, int presetIndex)
 {
     const auto& presets = getFactoryPresets();
@@ -215,6 +395,8 @@ inline void applyPreset(juce::AudioProcessorValueTreeState& apvts, int presetInd
         return;
 
     const auto& p = presets[static_cast<size_t>(presetIndex)];
+
+    apvts.state.setProperty(propPresetApplying, true, nullptr);
 
     if (auto* param = apvts.getParameter("diepte"))
         param->setValueNotifyingHost(param->convertTo0to1(p.diepte));
@@ -234,6 +416,224 @@ inline void applyPreset(juce::AudioProcessorValueTreeState& apvts, int presetInd
         param->setValueNotifyingHost(p.overdrive036 ? 1.0f : 0.0f);
     if (auto* param = apvts.getParameter("monoLock1300"))
         param->setValueNotifyingHost(p.monoLock1300 ? 1.0f : 0.0f);
+
+    writePresetMetadata(apvts.state, PresetKind::Factory, presetIndex, p.name, {}, false);
+    bumpPresetRevision(apvts.state);
+    apvts.state.setProperty(propPresetApplying, false, nullptr);
+}
+
+inline std::unique_ptr<juce::XmlElement> buildUserPresetXml(juce::AudioProcessorValueTreeState& apvts,
+                                                            const juce::String& presetName,
+                                                            const juce::File& targetFile = {},
+                                                            const juce::String& pluginVersion = "1.0.0")
+{
+    auto cleanName = sanitizePresetDisplayName(presetName);
+    if (cleanName.isEmpty())
+        cleanName = "User_Preset";
+
+    auto root = std::make_unique<juce::XmlElement>(kPresetXmlRootTag);
+    root->setAttribute("schemaVersion", kPresetSchemaVersion);
+    root->setAttribute("pluginVersion", pluginVersion);
+
+    auto* meta = root->createNewChildElement("Meta");
+    meta->setAttribute("name", cleanName);
+    meta->setAttribute("createdUtc", juce::Time::getCurrentTime().toISO8601(true));
+
+    auto stateCopy = apvts.copyState();
+    stateCopy.removeProperty(propPresetApplying, nullptr);
+    stateCopy.removeProperty(propPresetRevision, nullptr);
+    writePresetMetadata(stateCopy,
+                        PresetKind::User,
+                        -1,
+                        cleanName,
+                        targetFile.getFullPathName(),
+                        false);
+
+    if (auto paramXml = stateCopy.createXml())
+        root->addChildElement(paramXml.release());
+
+    return root;
+}
+
+inline bool savePresetToFile(juce::AudioProcessorValueTreeState& apvts,
+                             const juce::File& targetFileIn,
+                             const juce::String& presetNameIn,
+                             bool allowOverwrite,
+                             juce::String& outError,
+                             const juce::String& pluginVersion = "1.0.0")
+{
+    const auto cleanName = sanitizePresetDisplayName(presetNameIn);
+    if (cleanName.isEmpty())
+    {
+        outError = "Voer een geldige presetnaam in.";
+        return false;
+    }
+
+    if (isFactoryPresetName(cleanName))
+    {
+        outError = "Factory presets kunnen niet worden overschreven. Kies een eigen naam.";
+        return false;
+    }
+
+    juce::File targetFile = targetFileIn;
+    if (!targetFile.hasFileExtension(kPresetFileExtension))
+        targetFile = targetFile.withFileExtension("allypreset");
+
+    if (!allowOverwrite && targetFile.existsAsFile())
+    {
+        outError = "Presetbestand bestaat al. Bevestig overschrijven of kies een nieuwe naam.";
+        return false;
+    }
+
+    const auto parentDir = targetFile.getParentDirectory();
+    if (!parentDir.isDirectory() && !parentDir.createDirectory())
+    {
+        outError = "Kon de presetmap niet aanmaken: " + parentDir.getFullPathName();
+        return false;
+    }
+
+    const auto xml = buildUserPresetXml(apvts, cleanName, targetFile, pluginVersion);
+    if (xml == nullptr)
+    {
+        outError = "Kon preset-XML niet genereren.";
+        return false;
+    }
+
+    if (!targetFile.replaceWithText(xml->toString()))
+    {
+        outError = "Kon presetbestand niet opslaan naar: " + targetFile.getFullPathName();
+        return false;
+    }
+
+    apvts.state.setProperty(propPresetApplying, true, nullptr);
+    writePresetMetadata(apvts.state,
+                        PresetKind::User,
+                        -1,
+                        cleanName,
+                        targetFile.getFullPathName(),
+                        false);
+    bumpPresetRevision(apvts.state);
+    apvts.state.setProperty(propPresetApplying, false, nullptr);
+
+    outError.clear();
+    return true;
+}
+
+inline bool loadPresetFromFile(juce::AudioProcessorValueTreeState& apvts,
+                               const juce::File& sourceFile,
+                               juce::String& outPresetName,
+                               juce::String& outError)
+{
+    if (!sourceFile.existsAsFile())
+    {
+        outError = "Presetbestand bestaat niet.";
+        return false;
+    }
+
+    const auto xml = juce::XmlDocument::parse(sourceFile);
+    if (xml == nullptr || !xml->hasTagName(kPresetXmlRootTag))
+    {
+        outError = "Ongeldig presetformaat (verwacht ALLY1300Preset XML).";
+        return false;
+    }
+
+    const int schemaVersion = xml->getIntAttribute("schemaVersion", 0);
+    if (schemaVersion < 1 || schemaVersion > kPresetSchemaVersion)
+    {
+        outError = "Niet-ondersteunde presetversie: " + juce::String(schemaVersion);
+        return false;
+    }
+
+    const auto* paramsXml = xml->getChildByName(apvts.state.getType());
+    if (paramsXml == nullptr)
+    {
+        outError = "Preset mist parameterdata (" + apvts.state.getType().toString() + ").";
+        return false;
+    }
+
+    auto parsedTree = juce::ValueTree::fromXml(*paramsXml);
+    if (!parsedTree.isValid() || parsedTree.getType() != apvts.state.getType())
+    {
+        outError = "Preset-parameterstructuur is beschadigd.";
+        return false;
+    }
+
+    // Verify at least one genuine PARAM entry belongs to this plugin before mutating live state
+    const auto& knownIds = getAllParameterIds();
+    int matchedParams = 0;
+    for (int i = 0; i < parsedTree.getNumChildren(); ++i)
+    {
+        const auto child = parsedTree.getChild(i);
+        if (child.hasType("PARAM") && knownIds.contains(child.getProperty("id").toString()))
+            ++matchedParams;
+    }
+    if (matchedParams == 0)
+    {
+        outError = "Preset bevat geen bekende ALLY 1300-parameters.";
+        return false;
+    }
+
+    juce::String metaName;
+    if (const auto* metaXml = xml->getChildByName("Meta"))
+        metaName = sanitizePresetDisplayName(metaXml->getStringAttribute("name"));
+    if (metaName.isEmpty())
+        metaName = sanitizePresetDisplayName(sourceFile.getFileNameWithoutExtension());
+    if (metaName.isEmpty())
+        metaName = "User_Preset";
+
+    parsedTree.removeProperty(propPresetApplying, nullptr);
+    writePresetMetadata(parsedTree,
+                        PresetKind::User,
+                        -1,
+                        metaName,
+                        sourceFile.getFullPathName(),
+                        false);
+
+    apvts.state.setProperty(propPresetApplying, true, nullptr);
+    apvts.replaceState(parsedTree);
+    writePresetMetadata(apvts.state,
+                        PresetKind::User,
+                        -1,
+                        metaName,
+                        sourceFile.getFullPathName(),
+                        false);
+    bumpPresetRevision(apvts.state);
+    apvts.state.setProperty(propPresetApplying, false, nullptr);
+
+    outPresetName = metaName;
+    outError.clear();
+    return true;
+}
+
+inline std::vector<UserPresetEntry> scanUserPresetsDirectory(const juce::File& dir = getDefaultUserPresetsDirectory())
+{
+    std::vector<UserPresetEntry> entries;
+    if (!dir.isDirectory())
+        return entries;
+
+    const auto files = dir.findChildFiles(juce::File::findFiles, false, kPresetFileWildcard);
+    for (const auto& file : files)
+    {
+        juce::String displayName = file.getFileNameWithoutExtension();
+        if (const auto xml = juce::XmlDocument::parse(file))
+        {
+            if (xml->hasTagName(kPresetXmlRootTag))
+            {
+                if (const auto* meta = xml->getChildByName("Meta"))
+                {
+                    const auto parsedName = sanitizePresetDisplayName(meta->getStringAttribute("name"));
+                    if (parsedName.isNotEmpty())
+                        displayName = parsedName;
+                }
+            }
+        }
+        entries.push_back({ displayName, file });
+    }
+
+    std::sort(entries.begin(), entries.end(), [](const UserPresetEntry& a, const UserPresetEntry& b) {
+        return a.name.compareIgnoreCase(b.name) < 0;
+    });
+    return entries;
 }
 
 } // namespace AllyPresets

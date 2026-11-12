@@ -1,4 +1,5 @@
 #include "EngineeredDepthIcons.h"
+#include <cmath>
 
 namespace AllyGUI
 {
@@ -106,6 +107,98 @@ juce::Path EngineeredDepthIcons::buildStrokePath(IconId icon, juce::Rectangle<fl
             path.lineTo(19.0f, 8.5f);
             break;
 
+        case IconId::ChevronLeft:
+            // Matches Phase 5 chevron_left.svg (15,5 -> 8,12 -> 15,19)
+            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
+            path.startNewSubPath(15.0f, 5.5f);
+            path.lineTo(8.5f, 12.0f);
+            path.lineTo(15.0f, 18.5f);
+            break;
+
+        case IconId::ChevronRight:
+            // Matches Phase 5 chevron_right.svg (9,5 -> 16,12 -> 9,19)
+            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
+            path.startNewSubPath(9.0f, 5.5f);
+            path.lineTo(15.5f, 12.0f);
+            path.lineTo(9.0f, 18.5f);
+            break;
+
+        case IconId::Folder:
+            // Matches Phase 5 folder.svg with rounded corner folder tab
+            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
+            path.startNewSubPath(5.2f, 4.7f);
+            path.lineTo(9.2f, 4.7f);
+            path.lineTo(11.5f, 7.3f);
+            path.lineTo(18.8f, 7.3f);
+            path.quadraticTo(20.7f, 7.3f, 20.7f, 9.2f);
+            path.lineTo(20.7f, 18.4f);
+            path.quadraticTo(20.7f, 20.3f, 18.8f, 20.3f);
+            path.lineTo(5.2f, 20.3f);
+            path.quadraticTo(3.2f, 20.3f, 3.2f, 18.3f);
+            path.lineTo(3.2f, 6.7f);
+            path.quadraticTo(3.2f, 4.7f, 5.2f, 4.7f);
+            path.closeSubPath();
+            break;
+
+        case IconId::Save:
+            // Matches Phase 5 save.svg floppy contour + top shutter + bottom label pocket
+            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
+            path.startNewSubPath(4.0f, 3.5f);
+            path.lineTo(17.0f, 3.5f);
+            path.lineTo(20.5f, 7.0f);
+            path.lineTo(20.5f, 20.5f);
+            path.lineTo(3.5f, 20.5f);
+            path.lineTo(3.5f, 3.5f);
+            path.closeSubPath();
+            // Top shutter slot
+            path.startNewSubPath(7.0f, 3.7f);
+            path.lineTo(7.0f, 10.0f);
+            path.lineTo(15.5f, 10.0f);
+            path.lineTo(15.5f, 3.7f);
+            // Bottom label window
+            path.startNewSubPath(7.0f, 20.2f);
+            path.lineTo(7.0f, 13.5f);
+            path.lineTo(17.0f, 13.5f);
+            path.lineTo(17.0f, 20.2f);
+            break;
+
+        case IconId::Settings:
+        {
+            // Symmetrical 8-tooth gear centered at (12, 12) matching Phase 5 silhouette & master icon
+            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
+            const float cx = 12.0f;
+            const float cy = 12.0f;
+            const int teeth = 8;
+            const float outerR = 10.1f;
+            const float innerR = 7.45f;
+            for (int i = 0; i < teeth; ++i)
+            {
+                const float a0 = static_cast<float>(i) * juce::MathConstants<float>::twoPi / static_cast<float>(teeth);
+                const float halfToothOuter = 0.145f;
+                const float halfToothBase  = 0.235f;
+                const auto p1 = juce::Point<float>(cx + innerR * std::sin(a0 - halfToothBase),
+                                                   cy - innerR * std::cos(a0 - halfToothBase));
+                const auto p2 = juce::Point<float>(cx + outerR * std::sin(a0 - halfToothOuter),
+                                                   cy - outerR * std::cos(a0 - halfToothOuter));
+                const auto p3 = juce::Point<float>(cx + outerR * std::sin(a0 + halfToothOuter),
+                                                   cy - outerR * std::cos(a0 + halfToothOuter));
+                const auto p4 = juce::Point<float>(cx + innerR * std::sin(a0 + halfToothBase),
+                                                   cy - innerR * std::cos(a0 + halfToothBase));
+                if (i == 0)
+                    path.startNewSubPath(p1);
+                else
+                    path.lineTo(p1);
+                path.lineTo(p2);
+                path.lineTo(p3);
+                path.lineTo(p4);
+            }
+            path.closeSubPath();
+            // Center axle hole (wound via even-odd for crisp hollow hub)
+            path.addEllipse(cx - 3.35f, cy - 3.35f, 6.7f, 6.7f);
+            path.setUsingNonZeroWinding(false);
+            break;
+        }
+
         case IconId::None:
         default:
             outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
@@ -139,6 +232,19 @@ void EngineeredDepthIcons::drawIcon(juce::Graphics& g,
     const auto stroke = juce::PathStrokeType(strokeThickness,
                                              juce::PathStrokeType::curved,
                                              juce::PathStrokeType::rounded);
+
+    if (icon == IconId::Settings)
+    {
+        if (glowAlpha > 0.01f)
+        {
+            g.setColour(secondaryColour.withAlpha(glowAlpha * 0.42f));
+            g.strokePath(path, juce::PathStrokeType(strokeThickness * 1.4f), viewTransform);
+        }
+
+        g.setColour(primaryColour);
+        g.fillPath(path, viewTransform);
+        return;
+    }
 
     if (icon == IconId::OutputBars)
     {

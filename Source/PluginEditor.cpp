@@ -20,8 +20,8 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     secondaryDspPanel = std::make_unique<AllyGUI::SecondaryDspPanel>(audioProcessor.apvts);
     addAndMakeVisible(*secondaryDspPanel);
 
-    // 6. Preset Bar
-    setupPresets();
+    // 4. Engineered Depth Top Header, Branding, Preset Toolbar & Modals (Stap C.4A)
+    setupHeaderAndModals();
 
     // 7. Interactive Keyboard Component
     // Schakel ingebouwde QWERTY-mapping (die standaard op C5 staat!) en focus-steal van MidiKeyboardComponent UIT,
@@ -131,6 +131,16 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     if (key.getModifiers().isCommandDown() || key.getModifiers().isCtrlDown())
         return false;
 
+    if (isModalOverlayVisible())
+    {
+        if (key == juce::KeyPress::escapeKey)
+        {
+            closeModalOverlays();
+            return true;
+        }
+        return false;
+    }
+
     const int upperKey = std::toupper(key.getKeyCode());
 
     // Octave Shift: Z / X
@@ -139,6 +149,8 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
         releaseAllPressedKeys();
         currentOctave = juce::jmax(0, currentOctave - 1);
         updateKeyboardRange();
+        if (settingsOverlay != nullptr)
+            settingsOverlay->setCurrentOctave(currentOctave);
         repaint();
         return true;
     }
@@ -147,6 +159,8 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
         releaseAllPressedKeys();
         currentOctave = juce::jmin(5, currentOctave + 1);
         updateKeyboardRange();
+        if (settingsOverlay != nullptr)
+            settingsOverlay->setCurrentOctave(currentOctave);
         repaint();
         return true;
     }
@@ -164,6 +178,13 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
 {
     juce::ignoreUnused(isKeyDown);
+
+    if (isModalOverlayVisible())
+    {
+        if (!activeNotesByKey.empty())
+            releaseQwertyNotesOnly();
+        return false;
+    }
 
     const auto mods = juce::ModifierKeys::getCurrentModifiersRealtime();
     const bool cmdOrCtrlDown = mods.isCommandDown() || mods.isCtrlDown();
@@ -248,58 +269,140 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
     return anyHandled;
 }
 
-void AllyBassAudioProcessorEditor::setupPresets()
+bool AllyBassAudioProcessorEditor::isModalOverlayVisible() const noexcept
 {
-    presetLabel.setText("PRESET", juce::dontSendNotification);
-    presetLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 10.5f, juce::Font::bold));
-    presetLabel.setColour(juce::Label::textColourId, AllyGUI::BrutalistLookAndFeel::mutedText);
-    addAndMakeVisible(presetLabel);
+    return (settingsOverlay != nullptr && settingsOverlay->isVisible())
+        || (savePresetOverlay != nullptr && savePresetOverlay->isVisible());
+}
 
-    const auto& presets = AllyPresets::getFactoryPresets();
-    for (size_t i = 0; i < presets.size(); ++i)
+void AllyBassAudioProcessorEditor::closeModalOverlays()
+{
+    releaseAllPressedKeys();
+    if (settingsOverlay != nullptr)
+        settingsOverlay->setVisible(false);
+    if (savePresetOverlay != nullptr)
+        savePresetOverlay->setVisible(false);
+    grabKeyboardFocus();
+}
+
+void AllyBassAudioProcessorEditor::openSettingsModal()
+{
+    releaseAllPressedKeys();
+    if (savePresetOverlay != nullptr)
+        savePresetOverlay->setVisible(false);
+
+    if (settingsOverlay != nullptr)
     {
-        presetBox.addItem(presets[i].name, static_cast<int>(i + 1));
+        settingsOverlay->setCurrentOctave(currentOctave);
+        if (headerPanel != nullptr)
+            settingsOverlay->setActivePresetSummary(headerPanel->getDisplayedPresetText());
+        settingsOverlay->openModal();
     }
-    presetBox.setSelectedId(1, juce::dontSendNotification);
+}
 
-    presetBox.onChange = [this]()
+void AllyBassAudioProcessorEditor::openSavePresetModal()
+{
+    releaseAllPressedKeys();
+    if (settingsOverlay != nullptr)
+        settingsOverlay->setVisible(false);
+
+    if (savePresetOverlay != nullptr)
     {
-        int index = presetBox.getSelectedId() - 1;
-        AllyPresets::applyPreset(audioProcessor.apvts, index);
-    };
+        savePresetOverlay->prepareForSave(audioProcessor.getPresetStateInfo());
+        savePresetOverlay->openModal();
+    }
+}
 
-    addAndMakeVisible(presetBox);
+void AllyBassAudioProcessorEditor::openUserPresetAsync()
+{
+    releaseAllPressedKeys();
+
+    const auto defaultDir = AllyPresets::getDefaultUserPresetsDirectory();
+    const auto startDir = defaultDir.isDirectory()
+        ? defaultDir
+        : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+
+    openPresetChooser = std::make_unique<juce::FileChooser>("Open ALLY 1300 Preset (.allypreset)",
+                                                            startDir,
+                                                            AllyPresets::kPresetFileWildcard);
+
+    auto flags = juce::FileBrowserComponent::openMode
+               | juce::FileBrowserComponent::canSelectFiles;
+
+    juce::Component::SafePointer<AllyBassAudioProcessorEditor> safeThis(this);
+    openPresetChooser->launchAsync(flags, [safeThis](const juce::FileChooser& chooser)
+    {
+        if (safeThis == nullptr)
+            return;
+
+        safeThis->releaseAllPressedKeys();
+        const auto chosen = chooser.getResult();
+        if (chosen == juce::File())
+            return;
+
+        juce::String error;
+        if (!safeThis->audioProcessor.loadUserPresetFromFile(chosen, error))
+        {
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                                                   "Preset laden mislukt",
+                                                   error.isNotEmpty() ? error : "Ongeldig presetbestand.");
+        }
+
+        if (safeThis->headerPanel != nullptr)
+            safeThis->headerPanel->refreshFromProcessor();
+    });
+}
+
+void AllyBassAudioProcessorEditor::setupHeaderAndModals()
+{
+    headerPanel = std::make_unique<AllyGUI::HeaderPanel>(audioProcessor);
+    headerPanel->onBeforeInteractiveAction = [this]() { releaseAllPressedKeys(); };
+    headerPanel->onOpenPresetRequested     = [this]() { openUserPresetAsync(); };
+    headerPanel->onSavePresetRequested     = [this]() { openSavePresetModal(); };
+    headerPanel->onSettingsRequested       = [this]() { openSettingsModal(); };
+    addAndMakeVisible(*headerPanel);
+
+    settingsOverlay = std::make_unique<AllyGUI::SettingsOverlay>();
+    settingsOverlay->onDismissRequested = [this]()
+    {
+        releaseAllPressedKeys();
+        if (isShowing())
+            grabKeyboardFocus();
+    };
+    addChildComponent(*settingsOverlay);
+
+    savePresetOverlay = std::make_unique<AllyGUI::SavePresetOverlay>(
+        [this](const juce::File& targetFile,
+               const juce::String& presetName,
+               bool allowOverwrite,
+               juce::String& outError) -> bool
+        {
+            const bool ok = audioProcessor.saveUserPresetToFile(targetFile, presetName, allowOverwrite, outError);
+            if (ok && headerPanel != nullptr)
+                headerPanel->refreshFromProcessor();
+            return ok;
+        });
+    savePresetOverlay->onDismissRequested = [this]()
+    {
+        releaseAllPressedKeys();
+        if (isShowing())
+            grabKeyboardFocus();
+    };
+    addChildComponent(*savePresetOverlay);
 }
 
 void AllyBassAudioProcessorEditor::paint(juce::Graphics& g)
 {
     auto bounds = getLocalBounds().toFloat();
 
-    // 1. Concrete Brutalist Main Background
+    // 1. Concrete Brutalist Main Background (untouched lower section), Engineered Depth header backdrop top
     g.setColour(AllyGUI::BrutalistLookAndFeel::concreteDark);
     g.fillRect(bounds);
 
-    // Architectural Header Panel
-    auto headerArea = bounds.removeFromTop(56.0f);
-    g.setColour(AllyGUI::BrutalistLookAndFeel::concretePanel);
+    const float headerH = static_cast<float>(juce::jlimit(60, 84, juce::roundToInt(static_cast<float>(getHeight()) * 0.120f)));
+    auto headerArea = bounds.removeFromTop(headerH);
+    g.setColour(AllyGUI::EngineeredDepthTheme::Colors::bg);
     g.fillRect(headerArea);
-    g.setColour(AllyGUI::BrutalistLookAndFeel::concreteBorder);
-    g.drawHorizontalLine(static_cast<int>(headerArea.getBottom()), 0.0f, bounds.getRight());
-
-    // Logo Typography: ALLY - 1300 SUB SYNTH
-    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 17.5f, juce::Font::bold));
-    g.setColour(AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
-    g.drawText("ALLY - 1300 SUB SYNTH", 16, 10, 260, 22, juce::Justification::left);
-
-    // Subtitle & Postcode badge
-    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 9.5f, juce::Font::plain));
-    g.setColour(AllyGUI::BrutalistLookAndFeel::industrialText);
-    g.drawText("1300 ALMERE // -4.5m NAP", 18, 34, 240, 14, juce::Justification::left);
-
-    // Header Info
-    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 9.5f, juce::Font::plain));
-    g.setColour(AllyGUI::BrutalistLookAndFeel::mutedText);
-    g.drawText("NETNUMMER: 036", getWidth() - 170, 18, 150, 14, juce::Justification::right);
 
     // Panel separator above footer
     float footerY = static_cast<float>(getHeight() - 30);
@@ -326,12 +429,11 @@ void AllyBassAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
 
-    // Header area (56px)
-    area.removeFromTop(56);
-    int presetWidth = 228;
-    int centerX = (280 + (getWidth() - 125)) / 2;
-    presetLabel.setBounds(centerX - presetWidth / 2 - 22, 16, 52, 24);
-    presetBox.setBounds(centerX - presetWidth / 2 + 32, 16, presetWidth, 24);
+    // Engineered Depth Top Header Panel (Stap C.4A)
+    const int headerH = juce::jlimit(60, 84, juce::roundToInt(static_cast<float>(getHeight()) * 0.120f));
+    auto headerBounds = area.removeFromTop(headerH).reduced(14, 3);
+    if (headerPanel != nullptr)
+        headerPanel->setBounds(headerBounds);
 
     // Footer area (30px)
     area.removeFromBottom(30);
@@ -361,4 +463,11 @@ void AllyBassAudioProcessorEditor::resized()
 
     // 2. Top Main Knobs Row: Engineered Depth chamfered chassis with 5 uniform Depth Rings
     primaryKnobsPanel->setBounds(controlsArea.reduced(0, 2));
+
+    // Full-editor modal overlays sit cleanly centered above all controls when active
+    const auto fullBounds = getLocalBounds();
+    if (settingsOverlay != nullptr)
+        settingsOverlay->setBounds(fullBounds);
+    if (savePresetOverlay != nullptr)
+        savePresetOverlay->setBounds(fullBounds);
 }

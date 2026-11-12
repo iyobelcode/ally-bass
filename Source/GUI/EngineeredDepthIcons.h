@@ -22,7 +22,12 @@ struct EngineeredDepthIcons
         WaterwijkGlide,
         OutputBars,
         StadsdeelDsp,
-        ChevronDown
+        ChevronDown,
+        ChevronLeft,
+        ChevronRight,
+        Folder,
+        Save,
+        Settings
     };
 
     /** Returns normalized vector geometry in viewBox space and its reference bounds. */
