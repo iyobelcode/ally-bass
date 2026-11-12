@@ -343,6 +343,127 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
     }
 }
 
+void AllyBassAudioProcessor::dispatchSourcedMidiMessage(MidiOrigin origin,
+                                                        const juce::MidiMessage& message,
+                                                        float attackMs,
+                                                        float punchAmount,
+                                                        bool& outExternalMaskChanged)
+{
+    auto& ownMask   = (origin == MidiOrigin::External) ? audioExternalNotesMask : audioGuiHeldNotesMask;
+    const auto& otherMask = (origin == MidiOrigin::External) ? audioGuiHeldNotesMask : audioExternalNotesMask;
+
+    if (message.isNoteOn())
+    {
+        const int n = message.getNoteNumber();
+        if (n >= 0 && n < 128)
+        {
+            const size_t w = static_cast<size_t>(n >> 6);
+            const uint64_t bit = 1ULL << (n & 63);
+            if ((ownMask[w] & bit) == 0u)
+            {
+                ownMask[w] |= bit;
+                if (origin == MidiOrigin::External)
+                    outExternalMaskChanged = true;
+            }
+        }
+        handleMidiEvent(message, attackMs, punchAmount);
+        return;
+    }
+
+    if (message.isNoteOff())
+    {
+        const int n = message.getNoteNumber();
+        bool heldByOther = false;
+        if (n >= 0 && n < 128)
+        {
+            const size_t w = static_cast<size_t>(n >> 6);
+            const uint64_t bit = 1ULL << (n & 63);
+            if ((ownMask[w] & bit) != 0u)
+            {
+                ownMask[w] &= ~bit;
+                if (origin == MidiOrigin::External)
+                    outExternalMaskChanged = true;
+            }
+            heldByOther = ((otherMask[w] & bit) != 0u);
+        }
+
+        if (!heldByOther)
+            handleMidiEvent(message, attackMs, punchAmount);
+        return;
+    }
+
+    // CC 123 (All Notes Off) from DAW/External must release external notes without silencing GUI-held notes
+    if (message.isAllNotesOff() && origin == MidiOrigin::External)
+    {
+        const std::array<uint64_t, 2> prevExt = audioExternalNotesMask;
+        if (audioExternalNotesMask[0] != 0u || audioExternalNotesMask[1] != 0u)
+        {
+            audioExternalNotesMask = { 0u, 0u };
+            outExternalMaskChanged = true;
+        }
+
+        const bool guiHasHeld = (audioGuiHeldNotesMask[0] != 0u || audioGuiHeldNotesMask[1] != 0u);
+        if (!guiHasHeld)
+        {
+            handleMidiEvent(message, attackMs, punchAmount);
+        }
+        else
+        {
+            for (int w = 0; w < 2; ++w)
+            {
+                const uint64_t onlyExternal = prevExt[static_cast<size_t>(w)]
+                                            & ~audioGuiHeldNotesMask[static_cast<size_t>(w)];
+                if (onlyExternal == 0u)
+                    continue;
+
+                for (int b = 0; b < 64; ++b)
+                {
+                    if ((onlyExternal & (1ULL << b)) != 0u)
+                        handleMidiEvent(juce::MidiMessage::noteOff(1, w * 64 + b), attackMs, punchAmount);
+                }
+            }
+        }
+        return;
+    }
+
+    if (message.isAllSoundOff() || message.isAllNotesOff())
+    {
+        if (origin == MidiOrigin::External && (audioExternalNotesMask[0] != 0u || audioExternalNotesMask[1] != 0u))
+        {
+            audioExternalNotesMask = { 0u, 0u };
+            outExternalMaskChanged = true;
+        }
+        else if (origin == MidiOrigin::Gui)
+        {
+            audioGuiHeldNotesMask = { 0u, 0u };
+        }
+        handleMidiEvent(message, attackMs, punchAmount);
+        return;
+    }
+
+    handleMidiEvent(message, attackMs, punchAmount);
+}
+
+void AllyBassAudioProcessor::dispatchGuiQueueAndOverflow(const GuiMidiEvent* events,
+                                                         int numEvents,
+                                                         bool hadOverflow,
+                                                         float attackMs,
+                                                         float punchAmount)
+{
+    bool unusedExternalChanged = false;
+    for (int i = 0; i < numEvents; ++i)
+    {
+        const auto& ev = events[static_cast<size_t>(i)];
+        const auto msg = ev.isNoteOn
+            ? juce::MidiMessage::noteOn(ev.channel, ev.note, ev.velocity)
+            : juce::MidiMessage::noteOff(ev.channel, ev.note);
+        dispatchSourcedMidiMessage(MidiOrigin::Gui, msg, attackMs, punchAmount, unusedExternalChanged);
+    }
+
+    if (hadOverflow)
+        reconcileGuiOverflowNotes(attackMs, punchAmount);
+}
+
 void AllyBassAudioProcessor::handleNoteOn(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity)
 {
     if (suppressGuiMidiForwarding || midiNoteNumber < 0 || midiNoteNumber >= 128)
@@ -364,7 +485,7 @@ void AllyBassAudioProcessor::handleNoteOn(juce::MidiKeyboardState*, int midiChan
     });
 }
 
-void AllyBassAudioProcessor::handleNoteOff(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity)
+void AllyBassAudioProcessor::handleNoteOff(juce::MidiKeyboardState* source, int midiChannel, int midiNoteNumber, float velocity)
 {
     if (suppressGuiMidiForwarding || midiNoteNumber < 0 || midiNoteNumber >= 128)
         return;
@@ -372,6 +493,14 @@ void AllyBassAudioProcessor::handleNoteOff(juce::MidiKeyboardState*, int midiCha
     const size_t word = static_cast<size_t>(midiNoteNumber >> 6);
     const uint64_t bit = 1ULL << (midiNoteNumber & 63);
     guiDesiredNotesMask[word].fetch_and(~bit, std::memory_order_release);
+
+    // Keep key illuminated on shared keyboardState if DAW/external MIDI still holds this pitch
+    if ((externalMidiNotesMask[word].load(std::memory_order_acquire) & bit) != 0u && source != nullptr)
+    {
+        suppressGuiMidiForwarding = true;
+        source->noteOn(1, midiNoteNumber, 0.9f);
+        suppressGuiMidiForwarding = false;
+    }
 
     const float clampedVel = std::isfinite(velocity) ? juce::jlimit(0.0f, 1.0f, velocity) : 0.0f;
     pushGuiMidiEvent({
@@ -412,6 +541,10 @@ void AllyBassAudioProcessor::syncExternalMidiToKeyboardState(uint64_t& inOutLast
         externalMidiNotesMask[0].load(std::memory_order_acquire),
         externalMidiNotesMask[1].load(std::memory_order_acquire)
     };
+    const std::array<uint64_t, 2> guiHeld = {
+        guiDesiredNotesMask[0].load(std::memory_order_acquire),
+        guiDesiredNotesMask[1].load(std::memory_order_acquire)
+    };
 
     suppressGuiMidiForwarding = true;
     for (int w = 0; w < 2; ++w)
@@ -428,7 +561,7 @@ void AllyBassAudioProcessor::syncExternalMidiToKeyboardState(uint64_t& inOutLast
                 const int note = w * 64 + b;
                 if ((targetMask[static_cast<size_t>(w)] & bit) != 0u)
                     keyboardState.noteOn(1, note, 0.9f);
-                else
+                else if ((guiHeld[static_cast<size_t>(w)] & bit) == 0u)
                     keyboardState.noteOff(1, note, 0.0f);
             }
         }
@@ -471,6 +604,8 @@ void AllyBassAudioProcessor::reconcileGuiOverflowNotes(float attackMs, float pun
     };
     const int lastPressed = guiLastPressedNote.load(std::memory_order_acquire);
 
+    bool unusedExternalChanged = false;
+
     // 1. Release all stale held notes first so overflow never leaves stuck sound
     for (int w = 0; w < 2; ++w)
     {
@@ -484,8 +619,8 @@ void AllyBassAudioProcessor::reconcileGuiOverflowNotes(float attackMs, float pun
                 if ((staleOn & bit) != 0u)
                 {
                     const int note = w * 64 + b;
-                    audioGuiHeldNotesMask[static_cast<size_t>(w)] &= ~bit;
-                    handleMidiEvent(juce::MidiMessage::noteOff(1, note), attackMs, punchAmount);
+                    dispatchSourcedMidiMessage(MidiOrigin::Gui, juce::MidiMessage::noteOff(1, note),
+                                               attackMs, punchAmount, unusedExternalChanged);
                 }
             }
         }
@@ -510,10 +645,10 @@ void AllyBassAudioProcessor::reconcileGuiOverflowNotes(float attackMs, float pun
                         triggerLastPressed = true;
                         continue;
                     }
-                    audioGuiHeldNotesMask[static_cast<size_t>(w)] |= bit;
                     const float vel = juce::jlimit(
                         0.0f, 1.0f, guiDesiredVelocities[static_cast<size_t>(note)].load(std::memory_order_relaxed));
-                    handleMidiEvent(juce::MidiMessage::noteOn(1, note, vel), attackMs, punchAmount);
+                    dispatchSourcedMidiMessage(MidiOrigin::Gui, juce::MidiMessage::noteOn(1, note, vel),
+                                               attackMs, punchAmount, unusedExternalChanged);
                 }
             }
         }
@@ -521,12 +656,10 @@ void AllyBassAudioProcessor::reconcileGuiOverflowNotes(float attackMs, float pun
 
     if (triggerLastPressed && lastPressed >= 0 && lastPressed < 128)
     {
-        const size_t w = static_cast<size_t>(lastPressed >> 6);
-        const uint64_t bit = 1ULL << (lastPressed & 63);
-        audioGuiHeldNotesMask[w] |= bit;
         const float vel = juce::jlimit(
             0.0f, 1.0f, guiDesiredVelocities[static_cast<size_t>(lastPressed)].load(std::memory_order_relaxed));
-        handleMidiEvent(juce::MidiMessage::noteOn(1, lastPressed, vel), attackMs, punchAmount);
+        dispatchSourcedMidiMessage(MidiOrigin::Gui, juce::MidiMessage::noteOn(1, lastPressed, vel),
+                                   attackMs, punchAmount, unusedExternalChanged);
     }
 }
 
@@ -575,24 +708,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         // Even on 0-sample host ping, drain GUI events so noteOff/overflow never leaves hung state
         const float idleAttack = loadFiniteParam(rawAttack, 8.0f, 1.0f, 300.0f);
         const float idlePunch = loadFiniteParam(rawPolderPunch, 0.0f, 0.0f, 1.0f);
-        for (int i = 0; i < numGuiEvents; ++i)
-        {
-            const auto& ev = localGuiEvents[static_cast<size_t>(i)];
-            const size_t w = static_cast<size_t>(ev.note >> 6);
-            const uint64_t bit = 1ULL << (ev.note & 63);
-            if (ev.isNoteOn)
-            {
-                audioGuiHeldNotesMask[w] |= bit;
-                handleMidiEvent(juce::MidiMessage::noteOn(ev.channel, ev.note, ev.velocity), idleAttack, idlePunch);
-            }
-            else
-            {
-                audioGuiHeldNotesMask[w] &= ~bit;
-                handleMidiEvent(juce::MidiMessage::noteOff(ev.channel, ev.note), idleAttack, idlePunch);
-            }
-        }
-        if (hadGuiOverflow)
-            reconcileGuiOverflowNotes(idleAttack, idlePunch);
+        dispatchGuiQueueAndOverflow(localGuiEvents.data(), numGuiEvents, hadGuiOverflow, idleAttack, idlePunch);
         return;
     }
 
@@ -629,69 +745,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         smoothedMasterGain.setTargetValue(masterGain);
     }
 
-    auto processGuiNoteEventsAtSampleZero = [&]()
-    {
-        for (int i = 0; i < numGuiEvents; ++i)
-        {
-            const auto& ev = localGuiEvents[static_cast<size_t>(i)];
-            const size_t w = static_cast<size_t>(ev.note >> 6);
-            const uint64_t bit = 1ULL << (ev.note & 63);
-            if (ev.isNoteOn)
-            {
-                audioGuiHeldNotesMask[w] |= bit;
-                handleMidiEvent(juce::MidiMessage::noteOn(ev.channel, ev.note, ev.velocity), attackMs, polderPunch);
-            }
-            else
-            {
-                audioGuiHeldNotesMask[w] &= ~bit;
-                handleMidiEvent(juce::MidiMessage::noteOff(ev.channel, ev.note), attackMs, polderPunch);
-            }
-        }
-
-        if (hadGuiOverflow)
-            reconcileGuiOverflowNotes(attackMs, polderPunch);
-    };
-
     bool externalMidiMaskChanged = false;
-    auto trackExternalMidi = [&](const juce::MidiMessage& msg) noexcept
-    {
-        if (msg.isNoteOn())
-        {
-            const int n = msg.getNoteNumber();
-            if (n >= 0 && n < 128)
-            {
-                const size_t w = static_cast<size_t>(n >> 6);
-                const uint64_t bit = 1ULL << (n & 63);
-                if ((audioExternalNotesMask[w] & bit) == 0u)
-                {
-                    audioExternalNotesMask[w] |= bit;
-                    externalMidiMaskChanged = true;
-                }
-            }
-        }
-        else if (msg.isNoteOff())
-        {
-            const int n = msg.getNoteNumber();
-            if (n >= 0 && n < 128)
-            {
-                const size_t w = static_cast<size_t>(n >> 6);
-                const uint64_t bit = 1ULL << (n & 63);
-                if ((audioExternalNotesMask[w] & bit) != 0u)
-                {
-                    audioExternalNotesMask[w] &= ~bit;
-                    externalMidiMaskChanged = true;
-                }
-            }
-        }
-        else if (msg.isAllNotesOff() || msg.isAllSoundOff())
-        {
-            if (audioExternalNotesMask[0] != 0u || audioExternalNotesMask[1] != 0u)
-            {
-                audioExternalNotesMask = { 0u, 0u };
-                externalMidiMaskChanged = true;
-            }
-        }
-    };
 
     auto* leftOut = buffer.getWritePointer(0);
     auto* rightOut = totalNumOutputChannels > 1 ? buffer.getWritePointer(1) : nullptr;
@@ -700,7 +754,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     const auto midiEnd = midiMessages.cend();
     float sumSubRms = 0.0f;
 
-    processGuiNoteEventsAtSampleZero();
+    dispatchGuiQueueAndOverflow(localGuiEvents.data(), numGuiEvents, hadGuiOverflow, attackMs, polderPunch);
 
     for (int sample = 0; sample < numSamples; ++sample)
     {
@@ -708,8 +762,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         while (midiIterator != midiEnd && (*midiIterator).samplePosition <= sample)
         {
             const auto msg = (*midiIterator).getMessage();
-            trackExternalMidi(msg);
-            handleMidiEvent(msg, attackMs, polderPunch);
+            dispatchSourcedMidiMessage(MidiOrigin::External, msg, attackMs, polderPunch, externalMidiMaskChanged);
             ++midiIterator;
         }
 
@@ -797,8 +850,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     while (midiIterator != midiEnd)
     {
         const auto msg = (*midiIterator).getMessage();
-        trackExternalMidi(msg);
-        handleMidiEvent(msg, attackMs, polderPunch);
+        dispatchSourcedMidiMessage(MidiOrigin::External, msg, attackMs, polderPunch, externalMidiMaskChanged);
         ++midiIterator;
     }
 

@@ -210,7 +210,17 @@ private:
     std::atomic<bool>  outputClipLatched { false };
     std::atomic<uint64_t> outputMeterCounter { 0 };
 
+    enum class MidiOrigin
+    {
+        External,
+        Gui
+    };
+
     void handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount);
+    void dispatchSourcedMidiMessage(MidiOrigin origin, const juce::MidiMessage& message,
+                                    float attackMs, float punchAmount, bool& outExternalMaskChanged);
+    void dispatchGuiQueueAndOverflow(const GuiMidiEvent* events, int numEvents, bool hadOverflow,
+                                     float attackMs, float punchAmount);
     void reconcileGuiOverflowNotes(float attackMs, float punchAmount);
     void updateEnvelopeRates(float attackMs, float releaseMs);
     void publishScopeHistoryToTripleBuffer() noexcept;

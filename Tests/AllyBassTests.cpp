@@ -4001,6 +4001,293 @@ public:
 
 static DspQualityD1DTests dspQualityD1DTests;
 
+class MidiSourceIsolationD1E1Tests final : public juce::UnitTest
+{
+public:
+    MidiSourceIsolationD1E1Tests() : juce::UnitTest("ALLY1300 Same-Note MIDI Source Isolation (D.1E.1)", "AllyBass") {}
+
+    void runTest() override
+    {
+        beginTest("Primary collision: GUI NoteOff(41) must not silence or darken DAW-held Note 41");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+            proc.prepareToPlay(48000.0, 256);
+            setParamPlainValue(proc.apvts, "attack", 1.0f);
+            setParamPlainValue(proc.apvts, "release", 20.0f);
+
+            juce::AudioBuffer<float> buf(2, 256);
+            juce::MidiBuffer dawMidi;
+            uint64_t extVer = 0;
+            std::array<uint64_t, 2> extMask {};
+
+            // 1. DAW holds note 41
+            dawMidi.addEvent(juce::MidiMessage::noteOn(1, 41, 0.90f), 0);
+            for (int b = 0; b < 6; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+                dawMidi.clear();
+            }
+            proc.syncExternalMidiToKeyboardState(extVer, extMask);
+            expectEquals(proc.getEnvelopeStateInt(), 2); // Sustain
+            expect(proc.getKeyboardState().isNoteOn(1, 41), "DAW Note 41 must light keyboardState");
+
+            // 2. GUI presses same note 41
+            proc.getKeyboardState().noteOn(1, 41, 0.85f);
+            buf.clear();
+            proc.processBlock(buf, dawMidi);
+            expectEquals(proc.getEnvelopeStateInt(), 2);
+
+            // 3. GUI releases note 41 while DAW STILL holds 41
+            proc.getKeyboardState().noteOff(1, 41, 0.0f);
+            for (int b = 0; b < 15; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+            }
+            proc.syncExternalMidiToKeyboardState(extVer, extMask);
+
+            expectEquals(proc.getEnvelopeStateInt(), 2,
+                         "GUI NoteOff(41) must NOT push DAW-held Note 41 into Release/Idle");
+            expect(bufferPeak(buf) > 0.1f,
+                   "Audio output for DAW-held Note 41 must remain active after GUI NoteOff(41)");
+            expect(proc.getKeyboardState().isNoteOn(1, 41),
+                   "Visual key 41 must remain lit while DAW still holds Note 41");
+
+            // 4. Finally DAW releases note 41 -> voice must release cleanly to Idle and visual must clear
+            dawMidi.addEvent(juce::MidiMessage::noteOff(1, 41), 0);
+            for (int b = 0; b < 25; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+                dawMidi.clear();
+            }
+            proc.syncExternalMidiToKeyboardState(extVer, extMask);
+            expectEquals(proc.getEnvelopeStateInt(), 0, "Voice must return to Idle once both DAW & GUI released Note 41");
+            expect(bufferPeak(buf) < 1e-4f, "Audio must decay to silence after final DAW NoteOff(41)");
+            expect(!proc.getKeyboardState().isNoteOn(1, 41), "Visual key 41 must clear after final DAW NoteOff(41)");
+        }
+
+        beginTest("Reverse collision: DAW NoteOff(41) must not silence or desync GUI-held Note 41");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+            proc.prepareToPlay(48000.0, 256);
+            setParamPlainValue(proc.apvts, "attack", 1.0f);
+            setParamPlainValue(proc.apvts, "release", 20.0f);
+
+            juce::AudioBuffer<float> buf(2, 256);
+            juce::MidiBuffer dawMidi;
+            uint64_t extVer = 0;
+            std::array<uint64_t, 2> extMask {};
+
+            // 1. GUI holds note 41
+            proc.getKeyboardState().noteOn(1, 41, 0.88f);
+            for (int b = 0; b < 6; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 2);
+
+            // 2. DAW presses same note 41, then DAW releases 41 while GUI STILL holds 41
+            dawMidi.addEvent(juce::MidiMessage::noteOn(1, 41, 0.90f), 0);
+            buf.clear();
+            proc.processBlock(buf, dawMidi);
+            dawMidi.clear();
+            proc.syncExternalMidiToKeyboardState(extVer, extMask);
+
+            dawMidi.addEvent(juce::MidiMessage::noteOff(1, 41), 0);
+            for (int b = 0; b < 15; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+                dawMidi.clear();
+            }
+            proc.syncExternalMidiToKeyboardState(extVer, extMask);
+
+            expectEquals(proc.getEnvelopeStateInt(), 2,
+                         "DAW NoteOff(41) must NOT terminate GUI-held Note 41");
+            expect(bufferPeak(buf) > 0.1f,
+                   "Audio for GUI-held Note 41 must stay active after DAW NoteOff(41)");
+            expect(proc.getKeyboardState().isNoteOn(1, 41),
+                   "KeyboardState must keep GUI-held Note 41 lit after DAW NoteOff(41)");
+
+            // 3. GUI releases note 41 -> must actually reach audio thread and stop cleanly (no stuck note!)
+            proc.getKeyboardState().noteOff(1, 41, 0.0f);
+            for (int b = 0; b < 25; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 0, "GUI NoteOff(41) must stop voice once GUI finally releases");
+            expect(bufferPeak(buf) < 1e-4f, "Audio must decay to silence after GUI NoteOff(41)");
+            expect(!proc.getKeyboardState().isNoteOn(1, 41));
+        }
+
+        beginTest("Overlapping LIFO priority, repeated NoteOn, preset/octave/focus/editor reopen & overflow isolation");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+            proc.prepareToPlay(48000.0, 256);
+            setParamPlainValue(proc.apvts, "attack", 1.0f);
+            setParamPlainValue(proc.apvts, "release", 20.0f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 0.0f);
+
+            juce::AudioBuffer<float> buf(2, 256);
+            juce::MidiBuffer dawMidi;
+            uint64_t extVer = 0;
+            std::array<uint64_t, 2> extMask {};
+
+            // DAW holds 36, GUI adds 41, DAW also adds 41 & repeats 41
+            dawMidi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.85f), 0);
+            dawMidi.addEvent(juce::MidiMessage::noteOn(1, 41, 0.90f), 64);
+            buf.clear();
+            proc.processBlock(buf, dawMidi);
+            dawMidi.clear();
+
+            proc.getKeyboardState().noteOn(1, 41, 0.90f);
+            buf.clear();
+            proc.processBlock(buf, dawMidi);
+
+            auto dftMagAtHz = [](const std::vector<float>& samples, double hz, double sampleRate)
+            {
+                double re = 0.0;
+                double im = 0.0;
+                const double w = 2.0 * juce::MathConstants<double>::pi * hz / sampleRate;
+                for (size_t i = 0; i < samples.size(); ++i)
+                {
+                    const double theta = w * static_cast<double>(i);
+                    re += static_cast<double>(samples[i]) * std::cos(theta);
+                    im -= static_cast<double>(samples[i]) * std::sin(theta);
+                }
+                return std::sqrt(re * re + im * im);
+            };
+
+            // Repeated DAW NoteOn(41) + GUI NoteOff(41) -> 41 remains active in stack (~87.31 Hz, NOT 65.41 Hz)
+            dawMidi.addEvent(juce::MidiMessage::noteOn(1, 41, 0.95f), 0);
+            buf.clear();
+            proc.processBlock(buf, dawMidi);
+            dawMidi.clear();
+            proc.getKeyboardState().noteOff(1, 41, 0.0f);
+            std::vector<float> capture41;
+            capture41.reserve(8 * 256);
+            for (int b = 0; b < 8; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+                for (int s = 0; s < buf.getNumSamples(); ++s)
+                    capture41.push_back(buf.getSample(0, s));
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 2);
+            expect(dftMagAtHz(capture41, 87.307, 48000.0) > 3.0 * dftMagAtHz(capture41, 65.406, 48000.0),
+                   "After GUI NoteOff(41) with DAW Note 41 held, pitch must stay at Note 41 (~87.3 Hz)");
+
+            // Test editor focusLost, octave switch, preset change & destroy while DAW holds 41 AND GUI holds 41
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> baseEd(proc.createEditor());
+                auto* ed = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEd.get());
+                expect(ed != nullptr);
+                if (ed != nullptr)
+                {
+                    proc.getKeyboardState().noteOn(1, 41, 0.9f);
+                    buf.clear();
+                    proc.processBlock(buf, dawMidi);
+
+                    ed->setCurrentOctaveSafe(3);
+                    ed->focusLost(juce::Component::focusChangedDirectly);
+                    proc.setCurrentProgram(2);
+                    setParamPlainValue(proc.apvts, "release", 20.0f);
+
+                    for (int b = 0; b < 10; ++b)
+                    {
+                        buf.clear();
+                        proc.processBlock(buf, dawMidi);
+                    }
+                    proc.syncExternalMidiToKeyboardState(extVer, extMask);
+                    expectEquals(proc.getEnvelopeStateInt(), 2,
+                                 "Octave switch, focusLost & preset swap releasing GUI Note 41 must not kill DAW Note 41");
+                    expect(proc.getKeyboardState().isNoteOn(1, 41),
+                           "Visual key 41 must remain lit after GUI release while DAW holds 41");
+
+                    // Queue overflow while DAW holds 41 + GUI taps 41 & 48 then releases GUI keys
+                    for (int k = 0; k < 280; ++k)
+                    {
+                        const int n = (k % 2 == 0) ? 41 : 48;
+                        proc.getKeyboardState().noteOn(1, n, 0.85f);
+                        proc.getKeyboardState().noteOff(1, n, 0.0f);
+                    }
+                    for (int b = 0; b < 10; ++b)
+                    {
+                        buf.clear();
+                        proc.processBlock(buf, dawMidi);
+                    }
+                    expectEquals(proc.getEnvelopeStateInt(), 2,
+                                 "GUI queue overflow reconcile must not kill DAW-held Note 41");
+
+                    baseEd.reset();
+                    std::unique_ptr<juce::AudioProcessorEditor> reopened(proc.createEditor());
+                    expect(reopened != nullptr);
+                    expect(proc.getKeyboardState().isNoteOn(1, 41),
+                           "Reopened editor must keep DAW-held Note 41 lit");
+                }
+            }
+
+            // Release DAW 41 (falls back to DAW 36 ~65.41 Hz), then release DAW 36 -> Idle
+            dawMidi.addEvent(juce::MidiMessage::noteOff(1, 41), 0);
+            std::vector<float> capture36;
+            capture36.reserve(8 * 256);
+            for (int b = 0; b < 8; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+                dawMidi.clear();
+                for (int s = 0; s < buf.getNumSamples(); ++s)
+                    capture36.push_back(buf.getSample(0, s));
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 2, "Releasing 41 must return to held DAW 36");
+            expect(dftMagAtHz(capture36, 65.406, 48000.0) > 3.0 * dftMagAtHz(capture36, 87.307, 48000.0),
+                   "Releasing DAW Note 41 must fall back in LIFO stack to DAW Note 36 (~65.4 Hz)");
+
+            dawMidi.addEvent(juce::MidiMessage::noteOff(1, 36), 0);
+            for (int b = 0; b < 25; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+                dawMidi.clear();
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 0, "Final DAW NoteOff(36) must release cleanly to Idle");
+
+            // External CC 123 (AllNotesOff) while GUI holds Note 41 must NOT silence GUI-held Note 41
+            proc.getKeyboardState().noteOn(1, 41, 0.90f);
+            for (int b = 0; b < 6; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 2);
+            dawMidi.addEvent(juce::MidiMessage::allNotesOff(1), 0);
+            for (int b = 0; b < 8; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+                dawMidi.clear();
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 2, "DAW AllNotesOff (CC 123) must not kill GUI-held Note 41");
+            proc.getKeyboardState().noteOff(1, 41, 0.0f);
+            for (int b = 0; b < 25; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, dawMidi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 0, "Releasing GUI Note 41 after DAW AllNotesOff must stop cleanly");
+        }
+    }
+};
+
+static MidiSourceIsolationD1E1Tests midiSourceIsolationD1E1Tests;
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -4564,6 +4851,7 @@ int main(int argc, char* argv[])
         juce::Array<juce::UnitTest*> concurrencyUnits;
         concurrencyUnits.add(&concurrencyRealtimeSafetyD1CTests);
         concurrencyUnits.add(&scopeAndOutputMeterTests);
+        concurrencyUnits.add(&midiSourceIsolationD1E1Tests);
         runner.runTests(concurrencyUnits);
     }
     else if (runMode == "functional")
