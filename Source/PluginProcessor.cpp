@@ -173,8 +173,15 @@ void AllyBassAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
     masterLowPass.prepare(spec);
     *masterLowPass.state = *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, 14000.0f, 0.7071f);
 
+    const double validSr = sampleRate > 1.0 ? sampleRate : 44100.0;
+    velocitySmoothCoeff = 1.0f - std::exp(-1.0f / juce::jmax(1.0f, 0.002f * static_cast<float>(validSr)));
+
     envState = EnvelopeState::Idle;
     envLevel = 0.0f;
+    targetVelocity = 1.0f;
+    currentVelocityGain = 1.0f;
+    updateEnvelopeRates(apvts.getRawParameterValue("attack")->load(),
+                        apvts.getRawParameterValue("release")->load());
     resetOutputTelemetry();
 }
 
@@ -202,41 +209,51 @@ bool AllyBassAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) 
 void AllyBassAudioProcessor::updateEnvelopeRates(float attackMs, float releaseMs)
 {
     double sr = getSampleRate();
-    if (sr <= 0.0) return;
+    if (sr <= 0.0)
+        sr = currentSampleRateHz.load(std::memory_order_relaxed);
+    if (sr <= 0.0)
+        return;
 
-    float sampleRateFloat = static_cast<float>(sr);
+    const float sampleRateFloat = static_cast<float>(sr);
 
-    // 1. Attack rate: smooth linear increment per sample towards targetVelocity (minimaal 8ms)
-    float attackSec = juce::jmax(0.008f, attackMs * 0.001f);
-    float attackSamples = attackSec * sampleRateFloat;
+    // 1. Normalized [0 -> 1] linear attack rate honoring full APVTS range (1.0 - 300.0 ms)
+    const float attackSec = juce::jmax(0.001f, attackMs * 0.001f);
+    const float attackSamples = juce::jmax(1.0f, attackSec * sampleRateFloat);
     attackRate = 1.0f / attackSamples;
 
-    // Release rate: drops to ~1% (-40 dB) in releaseMs
-    float releaseSec = juce::jmax(0.005f, releaseMs * 0.001f);
-    float releaseSamples = releaseSec * sampleRateFloat;
+    // 2. Release rate: drops to ~1% (-40 dB) in releaseMs
+    const float releaseSec = juce::jmax(0.005f, releaseMs * 0.001f);
+    const float releaseSamples = juce::jmax(1.0f, releaseSec * sampleRateFloat);
     releaseRate = std::exp(-4.605f / releaseSamples);
 }
 
 void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount)
 {
+    juce::ignoreUnused(attackMs);
+
     if (message.isNoteOn())
     {
-        float glideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
-        float vel = message.getFloatVelocity();
+        const float glideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
+        const float vel = juce::jlimit(0.0f, 1.0f, message.getFloatVelocity());
         waterwijkGlide.noteOn(message.getNoteNumber(), vel, glideMs);
 
+        const bool isFreshNote = waterwijkGlide.popTransientTrigger();
+        const bool startingFromSilence = (envState == EnvelopeState::Idle || envLevel <= 0.0001f);
+
         targetVelocity = vel;
+        if (startingFromSilence)
+        {
+            // Snap velocity gain while silent so Attack ramps strictly from 0 toward exact velocity
+            currentVelocityGain = vel;
+            envLevel = 0.0f;
+        }
 
-        // Smooth de attack om klikjes te elimineren (minimaal 8ms curve)
-        envState = EnvelopeState::Attack;
-        double sr = getSampleRate();
-        float attackSec = juce::jmax(0.008f, attackMs * 0.001f);
-        float attackSamples = attackSec * static_cast<float>(sr);
-        attackRate = juce::jmax(0.00001f, (targetVelocity - envLevel) / attackSamples);
-
-        // Trigger Polder Punch alleen bij nieuwe aanslag vanuit stilte (niet bij legato slide)
-        if (waterwijkGlide.popTransientTrigger())
+        if (isFreshNote)
+        {
+            // Fresh strike or retrigger during Release: run normalized Attack [envLevel -> 1.0]
+            envState = EnvelopeState::Attack;
             polderTransient.trigger(vel, punchAmount);
+        }
     }
     else if (message.isNoteOff())
     {
@@ -253,6 +270,8 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
         polderTransient.reset();
         envState = EnvelopeState::Idle;
         envLevel = 0.0f;
+        targetVelocity = 0.0f;
+        currentVelocityGain = 0.0f;
     }
 }
 
@@ -312,7 +331,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         if (waterwijkGlide.popPhaseReset())
             napSubOsc.resetNapLock();
 
-        // Advance Envelope State Machine (Attack -> Sustain -> Release)
+        // Advance Normalized Envelope State Machine (Attack [0->1] -> Sustain [1] -> Release [->0])
         switch (envState)
         {
             case EnvelopeState::Idle:
@@ -321,15 +340,15 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
             case EnvelopeState::Attack:
                 envLevel += attackRate;
-                if (envLevel >= targetVelocity)
+                if (envLevel >= 1.0f)
                 {
-                    envLevel = targetVelocity;
+                    envLevel = 1.0f;
                     envState = EnvelopeState::Sustain;
                 }
                 break;
 
             case EnvelopeState::Sustain:
-                envLevel = targetVelocity;
+                envLevel = 1.0f;
                 break;
 
             case EnvelopeState::Release:
@@ -342,13 +361,23 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
                 break;
         }
 
+        // Smooth velocity gain transitions cleanly without altering Attack/Release duration
+        if (envState != EnvelopeState::Idle)
+        {
+            if (std::abs(targetVelocity - currentVelocityGain) > 1e-6f)
+                currentVelocityGain += velocitySmoothCoeff * (targetVelocity - currentVelocityGain);
+            else
+                currentVelocityGain = targetVelocity;
+        }
+
+        const float ampEnv = envLevel * currentVelocityGain;
         float synthSample = 0.0f;
 
-        if (envLevel > 0.0001f || polderTransient.getIsActive())
+        if (ampEnv > 0.0f || polderTransient.getIsActive())
         {
             // 1. NAP Sub-Oscillator (Clean low Sine/Warm hybrid)
-            float subSample = (envLevel > 0.0001f)
-                ? (napSubOsc.processSample(instantFreq, diepte) * envLevel)
+            float subSample = (ampEnv > 0.0f)
+                ? (napSubOsc.processSample(instantFreq, diepte) * ampEnv)
                 : 0.0f;
 
             // 2. Click-free Polder Punch transient

@@ -177,7 +177,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             "05_Muziekwijk_Pluck",
             0.55f,   // Diepte
             0.50f,   // Polder Punch: punchy knock
-            0.8f,    // Attack: 0.8 ms
+            1.0f,    // Attack: 1.0 ms (matches 1-300 ms APVTS range)
             180.0f,  // Release: 180 ms short pluck
             0.20f,   // Haven Dirt
             0.0f,    // Waterwijk Glide: 0

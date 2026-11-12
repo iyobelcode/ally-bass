@@ -102,13 +102,15 @@ private:
     // Low-pass filter to tame harsh highs
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> masterLowPass;
 
-    // Click-Free Envelope Generator (Attack - Sustain - Release)
+    // Normalized [0..1] Envelope Generator (Attack - Sustain - Release) + decoupled smoothed velocity gain
     enum class EnvelopeState { Idle, Attack, Sustain, Release };
     EnvelopeState envState = EnvelopeState::Idle;
     float envLevel = 0.0f;
     float attackRate = 0.0f;
     float releaseRate = 0.999f;
     float targetVelocity = 1.0f;
+    float currentVelocityGain = 1.0f;
+    float velocitySmoothCoeff = 0.01f;
 
     // Lock-free Visualizer Ring Buffer & Post-Output Meter Atomics
     std::array<std::atomic<float>, visualizerBufferSize> visualizerBuffer {};

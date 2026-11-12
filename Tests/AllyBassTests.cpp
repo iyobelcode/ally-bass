@@ -275,7 +275,9 @@ public:
                 expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "monoLock1300"),
                                           preset.monoLock1300 ? 1.0f : 0.0f, 1e-4f);
 
-                // Attack parameter clamps below 1.0 ms (e.g. preset 5 requests 0.8 ms -> 1.0 ms)
+                // All factory presets must stay within APVTS attack range [1.0, 300.0] ms (including 05_Muziekwijk_Pluck)
+                expect(preset.attackMs >= 1.0f && preset.attackMs <= 300.0f,
+                       "All factory presets must specify attackMs within [1.0, 300.0] ms");
                 auto* attackParam = proc.apvts.getParameter("attack");
                 expect(attackParam != nullptr, "Attack parameter must exist");
                 if (attackParam != nullptr)
@@ -1251,6 +1253,263 @@ public:
     }
 };
 
+class AttackEnvelopeD1BTests final : public juce::UnitTest
+{
+public:
+    AttackEnvelopeD1BTests() : juce::UnitTest("ALLY1300 Attack Envelope & Velocity (D.1B)", "AllyBass") {}
+
+    void runTest() override
+    {
+        struct ScheduledNote
+        {
+            int samplePos = 0;
+            bool isNoteOn = true;
+            int note = 69;
+            float velocity = 1.0f;
+        };
+
+        auto renderSequence = [](double sr,
+                                 int blockSize,
+                                 int totalSamples,
+                                 float attackMs,
+                                 float releaseMs,
+                                 float polderPunch,
+                                 float glideMs,
+                                 const std::vector<ScheduledNote>& events)
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, sr, blockSize);
+            proc.prepareToPlay(sr, blockSize);
+
+            setParamPlainValue(proc.apvts, "diepte", 0.0f);
+            setParamPlainValue(proc.apvts, "polderPunch", polderPunch);
+            setParamPlainValue(proc.apvts, "havenDirt", 0.0f);
+            setParamPlainValue(proc.apvts, "stadsdeel", 2.0f); // clean Poort
+            setParamPlainValue(proc.apvts, "overdrive036", 0.0f);
+            setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+            setParamPlainValue(proc.apvts, "masterVolume", 0.0f);
+            setParamPlainValue(proc.apvts, "attack", attackMs);
+            setParamPlainValue(proc.apvts, "release", releaseMs);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", glideMs);
+
+            std::vector<float> out;
+            out.reserve(static_cast<size_t>(totalSamples));
+            juce::AudioBuffer<float> buf(2, blockSize);
+            juce::MidiBuffer midi;
+
+            for (int off = 0; off < totalSamples; off += blockSize)
+            {
+                const int n = juce::jmin(blockSize, totalSamples - off);
+                midi.clear();
+                for (const auto& ev : events)
+                {
+                    if (ev.samplePos >= off && ev.samplePos < off + n)
+                    {
+                        const int localPos = ev.samplePos - off;
+                        midi.addEvent(ev.isNoteOn
+                                          ? juce::MidiMessage::noteOn(1, ev.note, ev.velocity)
+                                          : juce::MidiMessage::noteOff(1, ev.note),
+                                      localPos);
+                    }
+                }
+
+                buf.setSize(2, n, false, false, true);
+                buf.clear();
+                proc.processBlock(buf, midi);
+                const float* ch0 = buf.getReadPointer(0);
+                out.insert(out.end(), ch0, ch0 + n);
+            }
+            return out;
+        };
+
+        auto measureT90Ms = [](const std::vector<float>& audio, double sr, int startSample, int steadyStart, double& outSteadyPeak)
+        {
+            outSteadyPeak = 0.0;
+            for (int i = steadyStart; i < static_cast<int>(audio.size()); ++i)
+                outSteadyPeak = juce::jmax(outSteadyPeak, static_cast<double>(std::abs(audio[static_cast<size_t>(i)])));
+
+            const int halfWin = juce::jmax(4, static_cast<int>(sr / 880.0));
+            for (int i = startSample; i < static_cast<int>(audio.size()); ++i)
+            {
+                const int a = juce::jmax(startSample, i - halfWin / 2);
+                const int b = juce::jmin(static_cast<int>(audio.size()) - 1, i + halfWin / 2);
+                double localPk = 0.0;
+                for (int k = a; k <= b; ++k)
+                    localPk = juce::jmax(localPk, static_cast<double>(std::abs(audio[static_cast<size_t>(k)])));
+                if (localPk >= 0.90 * outSteadyPeak)
+                    return 1000.0 * static_cast<double>(i - startSample) / sr;
+            }
+            return -1.0;
+        };
+
+        beginTest("Buffer-size invariance (<= 1 sample) across 44.1/48/96 kHz, 32..16384 BS, and Attack 1..300 ms");
+        {
+            constexpr double sampleRates[] = { 44100.0, 48000.0, 96000.0 };
+            constexpr int blockSizes[] = { 32, 64, 256, 1024 };
+            constexpr float attackTimes[] = { 1.0f, 2.0f, 3.5f, 8.0f, 25.0f, 85.0f, 300.0f };
+
+            for (double sr : sampleRates)
+            {
+                const int totalSamples = static_cast<int>(sr * 0.42);
+                const int steadyStart = static_cast<int>(sr * 0.34);
+                const int midiOffset = 19; // mid-block sample-accurate trigger
+
+                std::vector<double> prevT90;
+                for (float attMs : attackTimes)
+                {
+                    const std::vector<ScheduledNote> seq = {
+                        { midiOffset, true, 69, 0.5f },
+                        { static_cast<int>(sr * 0.38), false, 69, 0.0f }
+                    };
+
+                    const auto refBuf = renderSequence(sr, 16384, totalSamples, attMs, 150.0f, 0.0f, 0.0f, seq);
+                    double refSteadyPk = 0.0;
+                    const double refT90 = measureT90Ms(refBuf, sr, midiOffset, steadyStart, refSteadyPk);
+                    expect(refSteadyPk > 0.25, "Note at vel=0.5 must reach steady peak");
+                    expect(refT90 >= 0.0, "Attack t90 must be reached");
+                    prevT90.push_back(refT90);
+
+                    for (int bs : blockSizes)
+                    {
+                        const auto bsBuf = renderSequence(sr, bs, totalSamples, attMs, 150.0f, 0.0f, 0.0f, seq);
+                        expectEquals(static_cast<int>(bsBuf.size()), static_cast<int>(refBuf.size()));
+
+                        float maxWaveformDiff = 0.0f;
+                        for (size_t s = 0; s < refBuf.size(); ++s)
+                        {
+                            expect(std::isfinite(bsBuf[s]), "Buffer-size invariance output must be finite");
+                            maxWaveformDiff = juce::jmax(maxWaveformDiff, std::abs(bsBuf[s] - refBuf[s]));
+                        }
+                        expect(maxWaveformDiff < 1e-5f,
+                               "Attack/Release waveform must be sample-exact identical across BS 32..16384");
+                    }
+                }
+
+                // Verify genuine sub-8 ms Attack differentiation: 1 < 2 < 3.5 < 8 < 25 < 85 < 300 ms
+                expect(prevT90[0] < prevT90[1] && prevT90[1] < prevT90[2] && prevT90[2] < prevT90[3]
+                    && prevT90[3] < prevT90[4] && prevT90[4] < prevT90[5] && prevT90[5] < prevT90[6],
+                       "Attack 1..300 ms (including <8 ms) must differentiate monotonically without hidden 8 ms floor");
+            }
+        }
+
+        beginTest("Velocity amplitude scaling & attack timing invariance across 0.1..1.0 and 1 ms safety");
+        {
+            constexpr float velocities[] = { 0.10f, 0.25f, 0.50f, 0.75f, 1.00f };
+            constexpr double sr = 48000.0;
+            constexpr int bs = 256;
+            const int totalSamples = static_cast<int>(sr * 0.20);
+            const int steadyStart = static_cast<int>(sr * 0.14);
+
+            // 85 ms Attack must have identical t90 across all velocities 0.1 .. 1.0
+            double baseT90 = -1.0;
+            double basePeak = 0.0;
+            for (int v = 4; v >= 0; --v)
+            {
+                const float vel = velocities[v];
+                const auto buf = renderSequence(sr, bs, totalSamples, 85.0f, 200.0f, 0.0f, 0.0f,
+                                                { { 0, true, 69, vel } });
+                double steadyPk = 0.0;
+                const double t90 = measureT90Ms(buf, sr, 0, steadyStart, steadyPk);
+                if (v == 4)
+                {
+                    baseT90 = t90;
+                    basePeak = steadyPk;
+                }
+                else
+                {
+                    expectWithinAbsoluteError(static_cast<float>(t90), static_cast<float>(baseT90),
+                                              static_cast<float>(1000.0 / sr));
+                    expectWithinAbsoluteError(static_cast<float>(steadyPk),
+                                              static_cast<float>(basePeak * vel), 0.015f);
+                }
+            }
+
+            // 1.0 ms fast Attack across 44.1/48/96 kHz, Punch OFF & ON: finite, no overshoot, no step clicks
+            for (double testSr : { 44100.0, 48000.0, 96000.0 })
+            {
+                for (float punch : { 0.0f, 1.0f })
+                {
+                    const auto buf = renderSequence(testSr, 128, static_cast<int>(testSr * 0.12),
+                                                    1.0f, 150.0f, punch, 0.0f,
+                                                    { { 0, true, 36, 1.0f } });
+                    float maxPk = 0.0f, maxDelta = 0.0f;
+                    for (size_t i = 0; i < buf.size(); ++i)
+                    {
+                        expect(std::isfinite(buf[i]), "1 ms attack output must remain finite");
+                        maxPk = juce::jmax(maxPk, std::abs(buf[i]));
+                        if (i > 0)
+                            maxDelta = juce::jmax(maxDelta, std::abs(buf[i] - buf[i - 1]));
+                    }
+                    expect(maxPk <= 1.15f && maxPk > 0.25f, "1 ms attack amplitude must stay controlled");
+                    expect(maxDelta < 0.07f, "1 ms attack must not produce discontinuity click");
+                }
+            }
+        }
+
+        beginTest("Fast note-on/off, legato overlap, Attack/Release retriggers, Polder Punch & Waterwijk Glide interaction");
+        {
+            constexpr double sr = 48000.0;
+
+            // 1. Retrigger from loud sustain/release (vel=1.0) down to quiet (vel=0.25) -> zero amplitude snap click
+            {
+                const std::vector<ScheduledNote> seq = {
+                    { 0,    true,  36, 1.00f },
+                    { 3072, false, 36, 0.00f },
+                    { 3584, true,  36, 0.25f } // retrigger mid-Release at lower velocity
+                };
+                const auto bufBs64   = renderSequence(sr, 64,   12000, 25.0f, 100.0f, 0.0f, 0.0f, seq);
+                const auto bufBs2048 = renderSequence(sr, 2048, 12000, 25.0f, 100.0f, 0.0f, 0.0f, seq);
+
+                float maxRetrigStep = 0.0f;
+                float maxBsDiff = 0.0f;
+                for (size_t i = 1; i < bufBs64.size(); ++i)
+                {
+                    expect(std::isfinite(bufBs64[i]), "Release retrigger output must be finite");
+                    maxBsDiff = juce::jmax(maxBsDiff, std::abs(bufBs64[i] - bufBs2048[i]));
+                    if (i >= 3072 && i <= 4500)
+                        maxRetrigStep = juce::jmax(maxRetrigStep, std::abs(bufBs64[i] - bufBs64[i - 1]));
+                }
+                expect(maxBsDiff < 1e-6f, "Retrigger sequence must match identically across BS 64 vs 2048");
+                expect(maxRetrigStep < 0.02f, "Downward velocity retrigger mid-Release must stay completely click-free");
+            }
+
+            // 2. Retrigger mid-Attack + Legato overlap with Polder Punch & Waterwijk Glide (0 ms and 80 ms)
+            for (float glideMs : { 0.0f, 80.0f })
+            {
+                for (float punch : { 0.0f, 0.8f })
+                {
+                    const std::vector<ScheduledNote> seq = {
+                        { 0,     true,  36, 0.85f }, // initial attack (85 ms)
+                        { 600,   true,  48, 0.35f }, // overlapping legato mid-Attack (vel drop!)
+                        { 2400,  false, 48, 0.00f }, // release upper note -> glide back to 36
+                        { 4800,  false, 36, 0.00f }, // release to tail
+                        { 5200,  true,  40, 0.95f }, // fast retrigger during Release
+                        { 6000,  false, 40, 0.00f },
+                        { 6200,  true,  33, 0.60f }, // quick detached staccato
+                        { 6450,  false, 33, 0.00f }
+                    };
+                    const auto b32   = renderSequence(sr, 32,   14000, 85.0f, 35.0f, punch, glideMs, seq);
+                    const auto b1024 = renderSequence(sr, 1024, 14000, 85.0f, 35.0f, punch, glideMs, seq);
+
+                    float maxPk = 0.0f, maxJump = 0.0f, maxDiff = 0.0f;
+                    for (size_t i = 0; i < b32.size(); ++i)
+                    {
+                        expect(std::isfinite(b32[i]), "Legato/retrigger stress output must remain finite");
+                        maxPk = juce::jmax(maxPk, std::abs(b32[i]));
+                        maxDiff = juce::jmax(maxDiff, std::abs(b32[i] - b1024[i]));
+                        if (i > 0)
+                            maxJump = juce::jmax(maxJump, std::abs(b32[i] - b32[i - 1]));
+                    }
+                    expect(maxDiff < 1e-5f, "Legato/retrigger + Glide + Punch must be buffer-size invariant");
+                    expect(maxPk <= 1.15f, "Must never overshoot or clip abnormally");
+                    expect(maxJump < 0.06f, "Legato & retrigger transitions must stay click-free");
+                    expect(std::abs(b32.back()) < 0.02f, "Note-off tail must decay cleanly");
+                }
+            }
+        }
+    }
+};
+
 template <typename ComponentType>
 ComponentType* findChildOfType(juce::Component& root)
 {
@@ -1863,6 +2122,7 @@ static ParameterAndStateTests parameterAndStateTests;
 static MidiGlideAndAudioTests midiGlideAndAudioTests;
 static PolderPunchTests polderPunchTests;
 static MonoLockDspTests monoLockDspTests;
+static AttackEnvelopeD1BTests attackEnvelopeD1BTests;
 static EngineeredDepthTests engineeredDepthTests;
 
 class HeaderBrandingAndPresetTests final : public juce::UnitTest
