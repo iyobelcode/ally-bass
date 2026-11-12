@@ -52,6 +52,14 @@ set(ALLY_SHARED_SOURCES
     Source/DSP/Overdrive036.h
     Source/GUI/BrutalistLookAndFeel.h
     Source/GUI/BrutalistLookAndFeel.cpp
+    Source/GUI/EngineeredDepthTheme.h
+    Source/GUI/EngineeredDepthTheme.cpp
+    Source/GUI/EngineeredDepthIcons.h
+    Source/GUI/EngineeredDepthIcons.cpp
+    Source/GUI/DepthRingLookAndFeel.h
+    Source/GUI/DepthRingLookAndFeel.cpp
+    Source/GUI/DepthRingKnob.h
+    Source/GUI/DepthRingKnob.cpp
     Source/GUI/NapWaveVisualizer.h
     Source/GUI/NapWaveVisualizer.cpp
     Source/GUI/HeavyKnob.h

@@ -13,8 +13,17 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     addAndMakeVisible(visualizer);
 
     // 2. The 5 Big Primary Knobs
-    knobDiepte = std::make_unique<AllyGUI::HeavyKnob>(
-        "DIEPTE", "diepte", audioProcessor.apvts, "NAP", false, false);
+    knobDiepte = std::make_unique<AllyGUI::DepthRingKnob>(
+        AllyGUI::DepthRingConfig{
+            "DIEPTE",
+            "diepte",
+            "NAP",
+            AllyGUI::EngineeredDepthTheme::AccentTheme::Cyan,
+            AllyGUI::EngineeredDepthIcons::IconId::DiepteWater,
+            2,
+            {}
+        },
+        audioProcessor.apvts);
     addAndMakeVisible(*knobDiepte);
 
     knobPolderPunch = std::make_unique<AllyGUI::HeavyKnob>(

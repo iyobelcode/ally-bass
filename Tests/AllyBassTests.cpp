@@ -7,6 +7,9 @@
 #include "Presets/PresetManager.h"
 #include "DSP/WaterwijkGlide.h"
 #include "DSP/PolderTransient.h"
+#include "GUI/DepthRingKnob.h"
+#include "GUI/EngineeredDepthIcons.h"
+#include "GUI/EngineeredDepthTheme.h"
 
 #include <cmath>
 #include <vector>
@@ -833,9 +836,268 @@ public:
     }
 };
 
+template <typename ComponentType>
+ComponentType* findChildOfType(juce::Component& root)
+{
+    if (auto* match = dynamic_cast<ComponentType*>(&root))
+        return match;
+
+    for (auto* child : root.getChildren())
+    {
+        if (auto* found = findChildOfType<ComponentType>(*child))
+            return found;
+    }
+    return nullptr;
+}
+
+juce::Image renderAtScale(juce::Component& component, float scaleFactor)
+{
+    const int imgW = juce::jmax(1, juce::roundToInt(static_cast<float>(component.getWidth()) * scaleFactor));
+    const int imgH = juce::jmax(1, juce::roundToInt(static_cast<float>(component.getHeight()) * scaleFactor));
+    juce::Image img(juce::Image::ARGB, imgW, imgH, true);
+    juce::Graphics g(img);
+    g.addTransform(juce::AffineTransform::scale(scaleFactor));
+    component.paintEntireComponent(g, true);
+    return img;
+}
+
+double imageDiffRms(const juce::Image& a, const juce::Image& b)
+{
+    if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight())
+        return 1.0;
+
+    const int w = a.getWidth();
+    const int h = a.getHeight();
+    double sumSq = 0.0;
+    const double count = static_cast<double>(w) * static_cast<double>(h) * 3.0;
+
+    for (int y = 0; y < h; ++y)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            const auto ca = a.getPixelAt(x, y);
+            const auto cb = b.getPixelAt(x, y);
+            const double dr = static_cast<double>(ca.getRed() - cb.getRed()) / 255.0;
+            const double dg = static_cast<double>(ca.getGreen() - cb.getGreen()) / 255.0;
+            const double db = static_cast<double>(ca.getBlue() - cb.getBlue()) / 255.0;
+            sumSq += dr * dr + dg * dg + db * db;
+        }
+    }
+    return std::sqrt(sumSq / count);
+}
+
+class EngineeredDepthTests final : public juce::UnitTest
+{
+public:
+    EngineeredDepthTests() : juce::UnitTest("ALLY1300 Engineered Depth & DIEPTE Ring", "AllyBass") {}
+
+    void runTest() override
+    {
+        beginTest("EngineeredDepthTheme tokens, state palettes, and vector icons are valid");
+        {
+            const auto cyanNormal = AllyGUI::EngineeredDepthTheme::resolveAccent(
+                AllyGUI::EngineeredDepthTheme::AccentTheme::Cyan, { false, false, true, false, true });
+            const auto cyanDrag = AllyGUI::EngineeredDepthTheme::resolveAccent(
+                AllyGUI::EngineeredDepthTheme::AccentTheme::Cyan, { true, true, true, true, true });
+            const auto cyanDisabled = AllyGUI::EngineeredDepthTheme::resolveAccent(
+                AllyGUI::EngineeredDepthTheme::AccentTheme::Cyan, { false, false, true, false, false });
+            const auto redNormal = AllyGUI::EngineeredDepthTheme::resolveAccent(
+                AllyGUI::EngineeredDepthTheme::AccentTheme::Red, { false, false, true, false, true });
+
+            expect(cyanNormal.primary != redNormal.primary, "Cyan and Red themes must differ");
+            expect(cyanDrag.primary.getBrightness() >= cyanNormal.primary.getBrightness(),
+                   "Dragging palette must stay at least as luminous as normal state");
+            expect(cyanDisabled.glow.getAlpha() == 0, "Disabled palette must suppress active glow");
+            expect(AllyGUI::EngineeredDepthTheme::getUiFontFamily().isNotEmpty(),
+                   "UI font family must resolve");
+            expect(AllyGUI::EngineeredDepthTheme::getDataFontFamily().isNotEmpty(),
+                   "Data font family must resolve");
+
+            const AllyGUI::EngineeredDepthIcons::IconId icons[] = {
+                AllyGUI::EngineeredDepthIcons::IconId::DiepteWater,
+                AllyGUI::EngineeredDepthIcons::IconId::PolderPunch,
+                AllyGUI::EngineeredDepthIcons::IconId::HavenDirt,
+                AllyGUI::EngineeredDepthIcons::IconId::WaterwijkGlide,
+                AllyGUI::EngineeredDepthIcons::IconId::OutputBars
+            };
+            for (const auto icon : icons)
+            {
+                juce::Rectangle<float> viewBox;
+                const auto p = AllyGUI::EngineeredDepthIcons::buildStrokePath(icon, viewBox);
+                expect(!p.isEmpty(), "Built vector icon path must be non-empty");
+                expect(viewBox.getWidth() > 0.0f && viewBox.getHeight() > 0.0f,
+                       "Icon viewBox must have positive dimensions");
+            }
+        }
+
+        beginTest("Editor replaces only DIEPTE with DepthRingKnob and syncs presets, mouse drag, double-click, and automation");
+        {
+            AllyBassAudioProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditor());
+            expect(editor != nullptr, "Editor must be created");
+
+            if (editor != nullptr)
+            {
+                auto* depthKnob = findChildOfType<AllyGUI::DepthRingKnob>(*editor);
+                expect(depthKnob != nullptr, "DIEPTE must use DepthRingKnob");
+
+                auto* diepteSlider = findSliderByName(*editor, "diepte");
+                expect(diepteSlider != nullptr && depthKnob != nullptr && diepteSlider == &depthKnob->getSlider(),
+                       "DIEPTE DepthRingKnob must expose its attached slider named 'diepte'");
+
+                if (depthKnob != nullptr && diepteSlider != nullptr)
+                {
+                    // Check exact 270-degree rotary sweep (-135 deg .. +135 deg)
+                    const auto rotary = diepteSlider->getRotaryParameters();
+                    expectWithinAbsoluteError(rotary.startAngleRadians, juce::MathConstants<float>::pi * 1.25f, 1e-4f);
+                    expectWithinAbsoluteError(rotary.endAngleRadians, juce::MathConstants<float>::pi * 2.75f, 1e-4f);
+
+                    // Check default display & double-click reset metadata
+                    expectEquals(depthKnob->getFormattedValueText(), juce::String("0.50 NAP"));
+                    expect(diepteSlider->isDoubleClickReturnEnabled(),
+                           "Double-click reset must be enabled");
+                    expectWithinAbsoluteError(static_cast<float>(diepteSlider->getDoubleClickReturnValue()),
+                                              0.50f, 1e-4f);
+
+                    // Host automation / APVTS -> DepthRingKnob
+                    setParamPlainValue(proc.apvts, "diepte", 0.00f);
+                    expectEquals(depthKnob->getFormattedValueText(), juce::String("0.00 NAP"));
+                    setParamPlainValue(proc.apvts, "diepte", 0.87f);
+                    expectEquals(depthKnob->getFormattedValueText(), juce::String("0.87 NAP"));
+                    expectWithinAbsoluteError(static_cast<float>(diepteSlider->getValue()), 0.87f, 1e-4f);
+
+                    // DepthRingKnob -> APVTS
+                    diepteSlider->setValue(0.24, juce::sendNotificationSync);
+                    expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "diepte"), 0.24f, 1e-4f);
+                    expectEquals(depthKnob->getFormattedValueText(), juce::String("0.24 NAP"));
+
+                    // Real mouse drag upwards increases value, double-click resets to 0.50
+                    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+                    const auto centre = diepteSlider->getLocalBounds().getCentre().toFloat();
+                    const auto now = juce::Time::getCurrentTime();
+
+                    juce::MouseEvent downEv(source, centre, juce::ModifierKeys::leftButtonModifier,
+                                            1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                            diepteSlider, diepteSlider, now, centre, now, 1, false);
+                    diepteSlider->mouseDown(downEv);
+
+                    const auto dragPos = centre.translated(0.0f, -50.0f);
+                    juce::MouseEvent dragEv(source, dragPos, juce::ModifierKeys::leftButtonModifier,
+                                            1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                            diepteSlider, diepteSlider, now + juce::RelativeTime::milliseconds(20),
+                                            centre, now, 1, true);
+                    diepteSlider->mouseDrag(dragEv);
+
+                    juce::MouseEvent upEv(source, dragPos, juce::ModifierKeys(),
+                                          0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                          diepteSlider, diepteSlider, now + juce::RelativeTime::milliseconds(30),
+                                          centre, now, 1, true);
+                    diepteSlider->mouseUp(upEv);
+
+                    const float afterDrag = getParamPlainValue(proc.apvts, "diepte");
+                    expect(afterDrag > 0.35f, "Upward rotary mouse drag must increase diepte APVTS value");
+
+                    juce::MouseEvent dblEv(source, centre, juce::ModifierKeys(),
+                                           1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                           diepteSlider, diepteSlider, now + juce::RelativeTime::milliseconds(80),
+                                           centre, now + juce::RelativeTime::milliseconds(80), 2, false);
+                    diepteSlider->mouseDoubleClick(dblEv);
+                    expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "diepte"), 0.50f, 1e-4f);
+                    expectEquals(depthKnob->getFormattedValueText(), juce::String("0.50 NAP"));
+
+                    // Factory presets update DIEPTE cleanly
+                    const auto& presets = AllyPresets::getFactoryPresets();
+                    for (size_t i = 0; i < presets.size(); ++i)
+                    {
+                        AllyPresets::applyPreset(proc.apvts, static_cast<int>(i));
+                        expectWithinAbsoluteError(static_cast<float>(diepteSlider->getValue()),
+                                                  presets[i].diepte, 1e-3f);
+                        expectEquals(depthKnob->getFormattedValueText(),
+                                     juce::String(presets[i].diepte, 2) + " NAP");
+                    }
+                }
+            }
+        }
+
+        beginTest("DepthRingKnob renders cleanly without clipping across scales and visual states");
+        {
+            AllyBassAudioProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditor());
+            expect(editor != nullptr, "Editor must be created");
+
+            if (editor != nullptr)
+            {
+                auto* depthKnob = findChildOfType<AllyGUI::DepthRingKnob>(*editor);
+                expect(depthKnob != nullptr, "DepthRingKnob must exist inside editor");
+
+                if (depthKnob != nullptr)
+                {
+                    // Check editor resize bounds (min 680x500, default 780x580, max 1200x850)
+                    const juce::Point<int> sizes[] = { { 680, 500 }, { 780, 580 }, { 1200, 850 } };
+                    for (const auto& sz : sizes)
+                    {
+                        editor->setSize(sz.x, sz.y);
+                        const auto local = depthKnob->getLocalBounds().toFloat();
+                        expect(local.contains(depthKnob->getTitleBounds()),
+                               "DIEPTE title bounds must fit inside knob bounds without clipping");
+                        expect(local.contains(depthKnob->getPillBounds()),
+                               "DIEPTE pill bounds must fit inside knob bounds");
+                        expect(local.contains(depthKnob->getDialBounds()),
+                               "DIEPTE dial bounds must fit inside knob bounds");
+                        expect(local.contains(depthKnob->getReadoutBounds()),
+                               "DIEPTE bracket readout must fit inside knob bounds without clipping");
+                        expect(depthKnob->getTitleBounds().getBottom() <= depthKnob->getDialBounds().getY(),
+                               "Title must remain cleanly above dial");
+                        expect(depthKnob->getDialBounds().getBottom() <= depthKnob->getReadoutBounds().getY(),
+                               "Readout must remain cleanly below dial");
+                    }
+
+                    editor->setSize(780, 580);
+
+                    // Check visual differences across 0%, 50%, 100% and disabled states
+                    setParamPlainValue(proc.apvts, "diepte", 0.00f);
+                    const auto img0 = renderAtScale(*depthKnob, 1.0f);
+
+                    setParamPlainValue(proc.apvts, "diepte", 0.50f);
+                    const auto img50 = renderAtScale(*depthKnob, 1.0f);
+
+                    setParamPlainValue(proc.apvts, "diepte", 1.00f);
+                    const auto img100 = renderAtScale(*depthKnob, 1.0f);
+
+                    expect(imageDiffRms(img0, img50) > 0.015,
+                           "0% and 50% Depth Ring renders must differ visibly (active arc & pointer)");
+                    expect(imageDiffRms(img50, img100) > 0.015,
+                           "50% and 100% Depth Ring renders must differ visibly");
+
+                    setParamPlainValue(proc.apvts, "diepte", 0.50f);
+                    const auto imgEnabled = renderAtScale(*depthKnob, 1.0f);
+                    depthKnob->setEnabled(false);
+                    const auto imgDisabled = renderAtScale(*depthKnob, 1.0f);
+                    depthKnob->setEnabled(true);
+                    expect(imageDiffRms(imgEnabled, imgDisabled) > 0.015,
+                           "Disabled Depth Ring render must differ visibly from enabled state");
+
+                    // Multi-scale HiDPI rendering verification (1.0x, 1.25x, 1.5x, 2.0x)
+                    const float scales[] = { 1.0f, 1.25f, 1.5f, 2.0f };
+                    for (const float scale : scales)
+                    {
+                        const auto scaled = renderAtScale(*depthKnob, scale);
+                        expect(scaled.isValid() && scaled.getWidth() > 0 && scaled.getHeight() > 0,
+                               "HiDPI scaled Depth Ring render must succeed");
+                        const auto emptyCheck = juce::Image(juce::Image::ARGB, scaled.getWidth(), scaled.getHeight(), true);
+                        expect(imageDiffRms(scaled, emptyCheck) > 0.02,
+                               "HiDPI scaled Depth Ring render must draw non-empty content");
+                    }
+                }
+            }
+        }
+    }
+};
+
 static ParameterAndStateTests parameterAndStateTests;
 static MidiGlideAndAudioTests midiGlideAndAudioTests;
 static PolderPunchTests polderPunchTests;
+static EngineeredDepthTests engineeredDepthTests;
 
 } // namespace
 
