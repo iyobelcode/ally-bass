@@ -178,13 +178,13 @@ void PrimaryKnobsPanel::resized()
     const int meterIntY = juce::roundToInt(meterTopY);
     const int meterIntH = juce::jmax(32, juce::roundToInt(meterBotY - meterTopY));
     outputMeter.setBounds(meterX, meterIntY, meterIntW, meterIntH);
+
+    cachedW = 0;
+    cachedH = 0;
 }
 
-void PrimaryKnobsPanel::paint(juce::Graphics& g)
+void PrimaryKnobsPanel::renderChassisToCache(juce::Graphics& g, float dirtLevel) const
 {
-    if (chassisBounds.isEmpty())
-        return;
-
     const float topChamfer    = juce::jlimit(8.0f, 18.0f, chassisBounds.getHeight() * 0.078f);
     const float bottomChamfer = juce::jlimit(7.0f, 15.0f, chassisBounds.getHeight() * 0.064f);
 
@@ -193,135 +193,236 @@ void PrimaryKnobsPanel::paint(juce::Graphics& g)
                                                                          juce::jmax(4.0f, topChamfer - 1.5f),
                                                                          juce::jmax(4.0f, bottomChamfer - 1.5f));
 
-    // 1. Machined dark outer shadow bevel
-    g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.88f));
+    // 1. Machined dark outer shadow housing
+    g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.92f));
     g.fillPath(outerPath);
 
-    // 2. Clipped interior metallic marine/slate console fill & subtle pocket contours
+    // 2. Clipped sculpted metallic chassis bays & 3D faceted sub-panels
     {
         juce::Graphics::ScopedSaveState save(g);
         g.reduceClipRegion(outerPath);
 
         const auto topBg = EngineeredDepthTheme::Colors::surface1.interpolatedWith(
-            EngineeredDepthTheme::Colors::surface2, 0.24f);
-        const auto midBg = EngineeredDepthTheme::Colors::surface1.darker(0.36f);
-        const auto botBg = EngineeredDepthTheme::Colors::bg.darker(0.24f);
+            EngineeredDepthTheme::Colors::surface2, 0.34f);
+        const auto midBg = EngineeredDepthTheme::Colors::surface1.darker(0.32f);
+        const auto botBg = EngineeredDepthTheme::Colors::bg.darker(0.30f);
 
         juce::ColourGradient chassisGrad(topBg,
                                          chassisBounds.getCentreX(), chassisBounds.getY(),
                                          botBg,
                                          chassisBounds.getCentreX(), chassisBounds.getBottom(),
                                          false);
-        chassisGrad.addColour(0.28, midBg);
-        chassisGrad.addColour(0.82, EngineeredDepthTheme::Colors::bg);
+        chassisGrad.addColour(0.24, midBg);
+        chassisGrad.addColour(0.78, EngineeredDepthTheme::Colors::bg);
         g.setGradientFill(chassisGrad);
         g.fillRect(chassisBounds);
 
-        // Soft upper brushed metallic wash along top console band
+        // Strong overhead studio metallic sheen across top console rail
         juce::ColourGradient topSheenGrad(
-            EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.08f),
+            EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.14f),
             chassisBounds.getCentreX(), chassisBounds.getY(),
             juce::Colours::transparentBlack,
-            chassisBounds.getCentreX(), chassisBounds.getY() + chassisBounds.getHeight() * 0.24f,
+            chassisBounds.getCentreX(), chassisBounds.getY() + chassisBounds.getHeight() * 0.25f,
             false);
         g.setGradientFill(topSheenGrad);
         g.fillRect(chassisBounds);
 
-        // Subtle Haven Dirt bay red ambient radial tone (static gradient, no heavy blur filters)
-        const auto& havenSlot = slotBounds[2];
-        if (!havenSlot.isEmpty())
+        const float yTop   = chassisBounds.getY() + 2.0f;
+        const float yBot   = chassisBounds.getBottom() - 2.0f;
+        const float bendY  = chassisBounds.getY() + topChamfer * 1.18f;
+        const float botBendY = chassisBounds.getBottom() - bottomChamfer * 1.15f;
+        const float bendDx = topChamfer * 0.85f;
+
+        if (!slotBounds[0].isEmpty() && !slotBounds[2].isEmpty() && !slotBounds[4].isEmpty())
         {
-            const float dirtLevel = havenDirtNormalized.load(std::memory_order_relaxed);
-            const float redAlpha = 0.035f + 0.055f * dirtLevel;
+            const float midLeftX  = static_cast<float>(slotBounds[2].getX());
+            const float midRightX = static_cast<float>(slotBounds[2].getRight());
+
+            // Recessed left wing bay (DIEPTE + POLDER PUNCH)
+            juce::Path leftBay;
+            leftBay.startNewSubPath(chassisBounds.getX() + topChamfer * 0.6f, yTop + topChamfer * 0.65f);
+            leftBay.lineTo(midLeftX - bendDx, yTop + 4.0f);
+            leftBay.lineTo(midLeftX - bendDx * 0.25f, bendY);
+            leftBay.lineTo(midLeftX - bendDx * 0.25f, botBendY);
+            leftBay.lineTo(midLeftX - bendDx, yBot - 4.0f);
+            leftBay.lineTo(chassisBounds.getX() + bottomChamfer * 0.65f, yBot - bottomChamfer * 0.65f);
+            leftBay.closeSubPath();
+
+            juce::ColourGradient wingGrad(juce::Colour(0xff0b1b24), chassisBounds.getCentreX(), yTop,
+                                          juce::Colour(0xff040c11), chassisBounds.getCentreX(), yBot, false);
+            g.setGradientFill(wingGrad);
+            g.fillPath(leftBay);
+
+            // Recessed right wing bay (WATERWIJK GLIDE + OUTPUT)
+            juce::Path rightBay;
+            rightBay.startNewSubPath(midRightX + bendDx, yTop + 4.0f);
+            rightBay.lineTo(chassisBounds.getRight() - topChamfer * 0.65f, yTop + topChamfer * 0.65f);
+            rightBay.lineTo(chassisBounds.getRight() - bottomChamfer * 0.65f, yBot - bottomChamfer * 0.65f);
+            rightBay.lineTo(midRightX + bendDx, yBot - 4.0f);
+            rightBay.lineTo(midRightX + bendDx * 0.25f, botBendY);
+            rightBay.lineTo(midRightX + bendDx * 0.25f, bendY);
+            rightBay.closeSubPath();
+
+            g.setGradientFill(wingGrad);
+            g.fillPath(rightBay);
+
+            // Sculpted chamfered hexagonal center compartment framing HAVEN DIRT
+            juce::Path centerBay;
+            centerBay.startNewSubPath(midLeftX - bendDx, yTop + 2.0f);
+            centerBay.lineTo(midRightX + bendDx, yTop + 2.0f);
+            centerBay.lineTo(midRightX + 1.0f, bendY);
+            centerBay.lineTo(midRightX + 1.0f, botBendY);
+            centerBay.lineTo(midRightX + bendDx, yBot - 2.0f);
+            centerBay.lineTo(midLeftX - bendDx, yBot - 2.0f);
+            centerBay.lineTo(midLeftX - 1.0f, botBendY);
+            centerBay.lineTo(midLeftX - 1.0f, bendY);
+            centerBay.closeSubPath();
+
+            juce::ColourGradient centerGrad(juce::Colour(0xff0f1c24), midLeftX, yTop,
+                                            juce::Colour(0xff040b10), midLeftX, yBot, false);
+            centerGrad.addColour(0.50, juce::Colour(0xff08131a));
+            g.setGradientFill(centerGrad);
+            g.fillPath(centerBay);
+
+            // Soft recessed circular seat halos under each of the 5 knobs so knobs nest cleanly in the chassis
+            for (int i = 0; i < knobCount; ++i)
+            {
+                if (knobs[static_cast<size_t>(i)] == nullptr || knobs[static_cast<size_t>(i)]->getDialBounds().isEmpty())
+                    continue;
+                const auto dialLocal = knobs[static_cast<size_t>(i)]->getDialBounds();
+                const float cx = static_cast<float>(knobs[static_cast<size_t>(i)]->getX()) + dialLocal.getCentreX();
+                const float cy = static_cast<float>(knobs[static_cast<size_t>(i)]->getY()) + dialLocal.getCentreY();
+                const float haloR = dialLocal.getWidth() * 0.56f;
+
+                juce::ColourGradient seatShadow(EngineeredDepthTheme::Colors::black.withAlpha(0.72f), cx, cy,
+                                                juce::Colours::transparentBlack, cx + haloR, cy, true);
+                g.setGradientFill(seatShadow);
+                g.fillEllipse(cx - haloR, cy - haloR, haloR * 2.0f, haloR * 2.0f);
+            }
+
+            // Center HAVEN DIRT red ambient chassis spill (both central glow and upper red bar bounce)
+            const auto& havenSlot = slotBounds[2];
             const auto havenCentre = havenSlot.getCentre().toFloat();
-            const float spillR = static_cast<float>(havenSlot.getWidth()) * 0.62f;
+            const float spillR = static_cast<float>(havenSlot.getWidth()) * 0.72f;
+            const float redAlpha = 0.06f + 0.11f * dirtLevel;
 
             juce::ColourGradient redSpill(EngineeredDepthTheme::Colors::red.withAlpha(redAlpha),
-                                          havenCentre.x, havenCentre.y,
+                                          havenCentre.x - spillR * 0.18f, havenCentre.y + 4.0f,
                                           juce::Colours::transparentBlack,
-                                          havenCentre.x + spillR, havenCentre.y,
+                                          havenCentre.x + spillR * 0.82f, havenCentre.y + 4.0f,
                                           true);
             g.setGradientFill(redSpill);
-            g.fillEllipse(havenCentre.x - spillR, havenCentre.y - spillR, spillR * 2.0f, spillR * 2.0f);
+            g.fillPath(centerBay);
+
+            // Top red pill light reflection onto center upper bezel plate
+            const float redTopY = static_cast<float>(havenSlot.getY()) + 16.0f;
+            juce::ColourGradient topRedGlint(EngineeredDepthTheme::Colors::red.withAlpha(0.08f + 0.08f * dirtLevel),
+                                             havenCentre.x, redTopY,
+                                             juce::Colours::transparentBlack,
+                                             havenCentre.x + spillR * 0.45f, redTopY,
+                                             true);
+            g.setGradientFill(topRedGlint);
+            g.fillPath(centerBay);
+
+            // Crisp machined bay contour & bevel highlight lines separating panels
+            auto drawBevelSeam = [&](const juce::Path& linePath, juce::Colour baseCol, float peakAlpha)
+            {
+                juce::ColourGradient seamGrad(baseCol.withAlpha(peakAlpha * 0.65f), 0.0f, yTop,
+                                              baseCol.withAlpha(peakAlpha * 0.28f), 0.0f, yBot, false);
+                seamGrad.addColour(0.45, baseCol.withAlpha(peakAlpha));
+                g.setGradientFill(seamGrad);
+                g.strokePath(linePath, juce::PathStrokeType(1.15f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
+            };
+
+            // Open-ended chamfered left/right bay separator walls framing HAVEN DIRT compartment cleanly
+            juce::Path centerWalls;
+            centerWalls.startNewSubPath(midLeftX - bendDx, yTop + 1.0f);
+            centerWalls.lineTo(midLeftX - 1.0f, bendY);
+            centerWalls.lineTo(midLeftX - 1.0f, botBendY);
+            centerWalls.lineTo(midLeftX - bendDx, yBot - 1.0f);
+
+            centerWalls.startNewSubPath(midRightX + bendDx, yTop + 1.0f);
+            centerWalls.lineTo(midRightX + 1.0f, bendY);
+            centerWalls.lineTo(midRightX + 1.0f, botBendY);
+            centerWalls.lineTo(midRightX + bendDx, yBot - 1.0f);
+
+            g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.80f));
+            g.strokePath(centerWalls, juce::PathStrokeType(2.2f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
+
+            const auto centerSeamCol = EngineeredDepthTheme::Colors::metalRimLight
+                                           .interpolatedWith(EngineeredDepthTheme::Colors::red, 0.10f + 0.24f * dirtLevel);
+            drawBevelSeam(centerWalls, centerSeamCol, 0.44f);
+
+            // Vertical subtle seam separating WATERWIJK GLIDE & OUTPUT + between DIEPTE & POLDER PUNCH
+            for (int sepIdx : { 0, 3 })
+            {
+                const float sx = static_cast<float>(slotBounds[static_cast<size_t>(sepIdx)].getRight());
+                juce::Path p;
+                p.startNewSubPath(sx, yTop + 10.0f);
+                p.lineTo(sx, yBot - 10.0f);
+                drawBevelSeam(p, EngineeredDepthTheme::Colors::stroke, 0.24f);
+            }
         }
 
-        // Subtle industrial bay contour traces (chamfered middle bay + side pockets from master)
-        const float yTop    = chassisBounds.getY() + 2.0f;
-        const float yBot    = chassisBounds.getBottom() - 2.0f;
-        const float bendY   = chassisBounds.getY() + topChamfer * 1.15f;
-        const float bendDx  = topChamfer * 0.72f;
-
-        auto drawPocketLine = [&](const juce::Path& linePath, float peakAlpha)
+        // Recessed sunken trough pocket around the Output Level Meter
+        if (!outputMeter.getBounds().isEmpty())
         {
-            juce::ColourGradient lineGrad(EngineeredDepthTheme::Colors::stroke.withAlpha(peakAlpha * 0.55f),
-                                          0.0f, yTop,
-                                          EngineeredDepthTheme::Colors::stroke.withAlpha(peakAlpha * 0.25f),
-                                          0.0f, yBot,
-                                          false);
-            lineGrad.addColour(0.45, EngineeredDepthTheme::Colors::stroke.withAlpha(peakAlpha));
-            g.setGradientFill(lineGrad);
-            g.strokePath(linePath, juce::PathStrokeType(1.0f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
-        };
-
-        if (!slotBounds[0].isEmpty() && !slotBounds[4].isEmpty())
-        {
-            // Left outer bay pocket trace
-            {
-                juce::Path p;
-                const float lx = static_cast<float>(slotBounds[0].getX()) + 2.0f;
-                p.startNewSubPath(chassisBounds.getX() + topChamfer * 0.45f, yTop + topChamfer * 0.55f);
-                p.lineTo(lx, bendY);
-                p.lineTo(lx, yBot - bottomChamfer * 0.35f);
-                drawPocketLine(p, 0.34f);
-            }
-
-            // Left boundary of middle HAVEN DIRT bay (chamfered top angle separating bay 1 & 2)
-            {
-                juce::Path p;
-                const float mx = static_cast<float>(slotBounds[2].getX());
-                p.startNewSubPath(mx - bendDx, yTop);
-                p.lineTo(mx, bendY);
-                p.lineTo(mx, yBot);
-                drawPocketLine(p, 0.42f);
-            }
-
-            // Right boundary of middle HAVEN DIRT bay (chamfered top angle separating bay 2 & 3)
-            {
-                juce::Path p;
-                const float mx = static_cast<float>(slotBounds[2].getRight());
-                p.startNewSubPath(mx + bendDx, yTop);
-                p.lineTo(mx, bendY);
-                p.lineTo(mx, yBot);
-                drawPocketLine(p, 0.42f);
-            }
-
-            // Subtle straight separator between WATERWIJK GLIDE & OUTPUT (bay 3 & 4)
-            {
-                juce::Path p;
-                const float rx = static_cast<float>(slotBounds[3].getRight());
-                p.startNewSubPath(rx, yTop + 4.0f);
-                p.lineTo(rx, yBot - 4.0f);
-                drawPocketLine(p, 0.30f);
-            }
+            const auto meterPocket = outputMeter.getBounds().toFloat().expanded(3.0f, 3.0f);
+            g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.88f));
+            g.fillRoundedRectangle(meterPocket, 3.0f);
+            g.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.45f));
+            g.drawRoundedRectangle(meterPocket, 3.0f, 0.85f);
         }
     }
 
-    // 3. Outer contour bevel & top specular rim edge matching Engineered Depth hardware chassis
-    g.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.90f));
-    g.strokePath(outerPath, juce::PathStrokeType(1.25f));
+    // 3. Crisp machined outer contour bezel + bright steel-blue top rail catch
+    g.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.95f));
+    g.strokePath(outerPath, juce::PathStrokeType(1.3f));
 
-    g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(0.28f));
-    g.strokePath(innerBevel, juce::PathStrokeType(0.85f));
+    g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.65f));
+    g.strokePath(innerBevel, juce::PathStrokeType(1.0f));
 
-    // Top metallic bevel catch-line along horizontal top rail + upper chamfers
     juce::Path topRimHighlight;
     topRimHighlight.startNewSubPath(chassisBounds.getX() + 2.0f, chassisBounds.getY() + topChamfer - 1.0f);
     topRimHighlight.lineTo(chassisBounds.getX() + topChamfer, chassisBounds.getY() + 1.0f);
     topRimHighlight.lineTo(chassisBounds.getRight() - topChamfer, chassisBounds.getY() + 1.0f);
     topRimHighlight.lineTo(chassisBounds.getRight() - 2.0f, chassisBounds.getY() + topChamfer - 1.0f);
 
-    g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.32f));
-    g.strokePath(topRimHighlight, juce::PathStrokeType(1.1f, juce::PathStrokeType::beveled, juce::PathStrokeType::butt));
+    g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.48f));
+    g.strokePath(topRimHighlight, juce::PathStrokeType(1.2f, juce::PathStrokeType::beveled, juce::PathStrokeType::butt));
+}
+
+void PrimaryKnobsPanel::paint(juce::Graphics& g)
+{
+    if (chassisBounds.isEmpty() || getWidth() <= 0 || getHeight() <= 0)
+        return;
+
+    const float scale = juce::jlimit(1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const float dirtLevel = havenDirtNormalized.load(std::memory_order_relaxed);
+    const int w = getWidth();
+    const int h = getHeight();
+
+    if (!cachedChassisImage.isValid()
+        || cachedW != w
+        || cachedH != h
+        || std::abs(scale - cachedScale) > 0.01f
+        || std::abs(dirtLevel - cachedDirtLevel) > 0.01f)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedChassisImage = juce::Image(juce::Image::ARGB, rw, rh, true);
+
+        juce::Graphics cacheG(cachedChassisImage);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        renderChassisToCache(cacheG, dirtLevel);
+
+        cachedW = w;
+        cachedH = h;
+        cachedScale = scale;
+        cachedDirtLevel = dirtLevel;
+    }
+
+    g.drawImage(cachedChassisImage, 0, 0, w, h, 0, 0, cachedChassisImage.getWidth(), cachedChassisImage.getHeight());
 }
 
 } // namespace AllyGUI

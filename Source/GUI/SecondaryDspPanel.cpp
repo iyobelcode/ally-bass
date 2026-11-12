@@ -182,8 +182,8 @@ void SecondaryDspPanel::paint(juce::Graphics& g)
     topRimHighlight.lineTo(chassisBounds.getX() + chamfer, chassisBounds.getY() + 1.0f);
     topRimHighlight.lineTo(chassisBounds.getRight() - chamfer, chassisBounds.getY() + 1.0f);
     topRimHighlight.lineTo(chassisBounds.getRight() - 2.0f, chassisBounds.getY() + chamfer - 1.0f);
-    g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.30f));
-    g.strokePath(topRimHighlight, juce::PathStrokeType(1.05f, juce::PathStrokeType::beveled, juce::PathStrokeType::butt));
+    g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.42f));
+    g.strokePath(topRimHighlight, juce::PathStrokeType(1.15f, juce::PathStrokeType::beveled, juce::PathStrokeType::butt));
 
     // 4. Vertical section dividers matching the approved master bar
     const float divPad = juce::jlimit(7.0f, 14.0f, chassisBounds.getHeight() * 0.16f);

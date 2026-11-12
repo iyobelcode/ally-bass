@@ -361,12 +361,12 @@ void NapWaveVisualizer::paint(juce::Graphics& g)
         g.fillRoundedRectangle(panelBounds.reduced(1.0f), juce::jmax(6.0f, radius - 1.0f));
     }
 
-    g.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.85f));
-    g.drawRoundedRectangle(panelBounds.reduced(0.5f), radius, 1.15f);
+    g.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.90f));
+    g.drawRoundedRectangle(panelBounds.reduced(0.5f), radius, 1.2f);
 
-    g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.22f));
+    g.setColour(EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.36f));
     g.drawLine(panelBounds.getX() + radius, panelBounds.getY() + 1.0f,
-               panelBounds.getRight() - radius, panelBounds.getY() + 1.0f, 1.0f);
+               panelBounds.getRight() - radius, panelBounds.getY() + 1.0f, 1.1f);
 
     // 2. Top Header Strip inside Scope:
     // Left: // WEERWATER VECTOR SCOPE
@@ -485,18 +485,18 @@ void NapWaveVisualizer::paint(juce::Graphics& g)
         g.reduceClipRegion(clipRectPath);
 
         // Layer A: Topographic NAP bathymetric contours fading subtly in submerged half
-        g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.085f));
+        g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.11f));
         g.strokePath(cachedContoursSecondary, juce::PathStrokeType(0.9f));
 
-        g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.165f));
+        g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.21f));
         g.strokePath(cachedContoursPrimary, juce::PathStrokeType(1.15f));
 
         // Layer B: Blueprint technical coordinate grid
-        g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(0.24f));
+        g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(0.28f));
         g.strokePath(cachedGridLines, juce::PathStrokeType(0.75f));
 
         // Layer C: Dashed -4.5 m NAP reference baseline
-        g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.45f));
+        g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.52f));
         g.fillPath(cachedDatumLine);
 
         // Layer D: Live Post-Output Audio Waveform Trace (or calm flat datum line on silence)
@@ -509,12 +509,12 @@ void NapWaveVisualizer::paint(juce::Graphics& g)
         if (!isSignalActive())
         {
             // Calm, noise-free resting signal right along -4.5 m NAP (zero fake idle oscillation)
-            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.11f));
-            g.drawLine(leftX, centerY, leftX + width, centerY, 5.0f);
-            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.56f));
+            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.13f));
+            g.drawLine(leftX, centerY, leftX + width, centerY, 5.5f);
+            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.60f));
             g.drawLine(leftX, centerY, leftX + width, centerY, 1.5f);
-            g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.72f));
-            g.drawLine(leftX, centerY, leftX + width, centerY, 0.70f);
+            g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.76f));
+            g.drawLine(leftX, centerY, leftX + width, centerY, 0.72f);
         }
         else
         {
@@ -538,38 +538,38 @@ void NapWaveVisualizer::paint(juce::Graphics& g)
             waveFillPath.lineTo(leftX, centerY);
             waveFillPath.closeSubPath();
 
-            juce::ColourGradient fillGrad(EngineeredDepthTheme::Colors::cyan.withAlpha(0.12f),
+            juce::ColourGradient fillGrad(EngineeredDepthTheme::Colors::cyan.withAlpha(0.20f),
                                           plotBounds.getCentreX(), plotBounds.getY(),
-                                          EngineeredDepthTheme::Colors::cyan.withAlpha(0.10f),
+                                          EngineeredDepthTheme::Colors::cyan.withAlpha(0.16f),
                                           plotBounds.getCentreX(), plotBounds.getBottom(),
                                           false);
-            fillGrad.addColour(0.50, juce::Colours::transparentBlack);
+            fillGrad.addColour(0.50, EngineeredDepthTheme::Colors::cyan.withAlpha(0.03f));
             g.setGradientFill(fillGrad);
             g.fillPath(waveFillPath);
 
             // Feathered multi-step cyan optical bloom (pure cyan + overdrive red fringe if overdrive ON; no murky grey mix)
             if (overdriveState)
             {
-                g.setColour(EngineeredDepthTheme::Colors::red.withAlpha(0.11f));
+                g.setColour(EngineeredDepthTheme::Colors::red.withAlpha(0.14f));
                 g.strokePath(waveStrokePath,
-                             juce::PathStrokeType(9.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                             juce::PathStrokeType(10.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             }
 
-            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.08f));
+            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.12f));
             g.strokePath(waveStrokePath,
-                         juce::PathStrokeType(9.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                         juce::PathStrokeType(10.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.16f));
+            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.24f));
             g.strokePath(waveStrokePath,
-                         juce::PathStrokeType(5.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                         juce::PathStrokeType(5.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.45f));
+            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.55f));
             g.strokePath(waveStrokePath,
-                         juce::PathStrokeType(2.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                         juce::PathStrokeType(2.9f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.95f));
+            g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.97f));
             g.strokePath(waveStrokePath,
-                         juce::PathStrokeType(1.35f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                         juce::PathStrokeType(1.45f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         }
     }
 }

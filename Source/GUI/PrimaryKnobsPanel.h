@@ -39,6 +39,7 @@ public:
 private:
     void parameterChanged(const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override;
+    void renderChassisToCache(juce::Graphics& g, float dirtLevel) const;
 
     juce::AudioProcessorValueTreeState& apvtsRef;
     std::array<std::unique_ptr<DepthRingKnob>, knobCount> knobs;
@@ -46,6 +47,12 @@ private:
     OutputLevelMeter outputMeter;
     juce::Rectangle<float> chassisBounds;
     std::atomic<float> havenDirtNormalized { 0.15f };
+
+    mutable juce::Image cachedChassisImage;
+    mutable int cachedW = 0;
+    mutable int cachedH = 0;
+    mutable float cachedScale = 0.0f;
+    mutable float cachedDirtLevel = -1.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PrimaryKnobsPanel)
 };

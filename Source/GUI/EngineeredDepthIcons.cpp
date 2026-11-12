@@ -46,7 +46,7 @@ juce::Path EngineeredDepthIcons::buildStrokePath(IconId icon, juce::Rectangle<fl
             break;
 
         case IconId::HavenDirt:
-            outViewBox = { 0.0f, 0.0f, 24.0f, 22.0f };
+            outViewBox = { 1.4f, 1.6f, 21.4f, 19.6f };
             appendWaveRow(path, 2.0f, 22.2f, 18.0f, 1.65f);
             appendWaveRow(path, 2.0f, 22.2f, 20.4f, 1.65f);
             break;

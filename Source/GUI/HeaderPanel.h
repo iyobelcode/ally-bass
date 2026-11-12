@@ -120,6 +120,7 @@ private:
     void drawWordmark(juce::Graphics& g) const;
     void drawLocationStack(juce::Graphics& g) const;
     void drawAlmereMapMotif(juce::Graphics& g) const;
+    void renderStaticHeaderToCache(juce::Graphics& g) const;
 
     AllyBassAudioProcessor& audioProcessor;
     PresetMenuLookAndFeel menuLookAndFeel;
@@ -139,6 +140,11 @@ private:
     juce::Rectangle<float> locationBounds;
     juce::Rectangle<float> mapBounds;
     juce::Rectangle<float> toolbarBounds;
+
+    mutable juce::Image cachedStaticHeader;
+    mutable int cachedW = 0;
+    mutable int cachedH = 0;
+    mutable float cachedScale = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(HeaderPanel)
 };

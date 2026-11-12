@@ -2796,6 +2796,192 @@ int main()
         return 0;
     }
 
+    const auto d2PreviewDir = juce::SystemStats::getEnvironmentVariable("ALLY_D2_PREVIEW_DIR", {});
+    if (d2PreviewDir.isNotEmpty())
+    {
+        juce::File dir(d2PreviewDir);
+        dir.createDirectory();
+
+        auto writePng = [](const juce::File& target, const juce::Image& image)
+        {
+            juce::PNGImageFormat png;
+            target.deleteFile();
+            if (auto out = target.createOutputStream())
+                png.writeImageToStream(image, *out);
+        };
+
+        auto renderComponentImage = [](juce::Component& c, float scale)
+        {
+            const int rw = juce::roundToInt(static_cast<float>(c.getWidth()) * scale);
+            const int rh = juce::roundToInt(static_cast<float>(c.getHeight()) * scale);
+            juce::Image img(juce::Image::ARGB, rw, rh, true);
+            {
+                juce::Graphics g(img);
+                g.addTransform(juce::AffineTransform::scale(scale));
+                c.paintEntireComponent(g, true);
+            }
+            return img;
+        };
+
+        auto feedScopeAndMeter = [](AllyBassAudioProcessor& proc, AllyBassAudioProcessorEditor& ed, int midiNote)
+        {
+            juce::AudioBuffer<float> audio(2, 256);
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, midiNote, 0.92f), 0);
+            for (int b = 0; b < 8; ++b)
+            {
+                audio.clear();
+                proc.processBlock(audio, midi);
+                midi.clear();
+            }
+
+            std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> buf {};
+            proc.getVisualizerData(buf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+            ed.getVisualizer().updateScopeWithSamples(buf.data(),
+                                                      AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                                      proc.isOverdriveActive(),
+                                                      proc.isMonoLockActive(),
+                                                      proc.getCurrentSampleRate());
+
+            if (auto* primary = ed.getPrimaryKnobsPanel())
+            {
+                if (auto* meter = primary->getOutputMeter())
+                {
+                    meter->reset();
+                    const auto metrics = proc.peekOutputMeterMetrics();
+                    for (int step = 0; step < 6; ++step)
+                        meter->advanceWithSampledLevels(metrics.peakLinear, metrics.rmsLinear, metrics.clipped, 0.022f);
+                }
+            }
+        };
+
+        // 1. Nominal Master-calibrated state (matches APPROVED_MASTER angles & resting white keys + C2 lit closeup)
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+            AllyPresets::applyPreset(proc.apvts, 0);
+            setParamPlainValue(proc.apvts, "diepte", 0.50f);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.0f);
+            setParamPlainValue(proc.apvts, "havenDirt", 0.15f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 40.0f);
+            setParamPlainValue(proc.apvts, "masterVolume", 0.0f);
+            setParamPlainValue(proc.apvts, "attack", 8.0f);
+            setParamPlainValue(proc.apvts, "release", 250.0f);
+            setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+            setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+
+            std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+            ed->setSize(780, 580);
+            feedScopeAndMeter(proc, *ed, 36);
+
+            // Clean unpressed steel-grey/titanium keys for Full UI (matching reference crop comparison)
+            proc.getKeyboardState().allNotesOff(1);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+
+            const auto full780_2x = renderComponentImage(*ed, 2.0f);
+            writePng(dir.getChildFile("D2_01_ALLY1300_Full_UI_780x580_2x.png"), full780_2x);
+
+            // Component closeups @ 2x
+            if (auto* hdr = ed->getHeaderPanel())
+                writePng(dir.getChildFile("D2_04_ALLY1300_Header_Map_Closeup_2x.png"), renderComponentImage(*hdr, 2.0f));
+            if (auto* primary = ed->getPrimaryKnobsPanel())
+                writePng(dir.getChildFile("D2_03_ALLY1300_Knobs_Chassis_Closeup_2x.png"), renderComponentImage(*primary, 2.0f));
+
+            // Keyboard closeup with active C2 + D#2 cyan key lighting so both resting keys and active keys are verified
+            proc.getKeyboardState().noteOn(1, 36, 0.94f);
+            proc.getKeyboardState().noteOn(1, 39, 0.90f);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+            {
+                kbPanel->getKeyboard().timerCallback();
+                const auto fullActiveKb = renderComponentImage(*ed, 2.0f);
+                const int cropY = juce::jmax(0, (kbPanel->getY() - 8) * 2);
+                const auto kbCloseup = fullActiveKb.getClippedImage({ 0, cropY, fullActiveKb.getWidth(), fullActiveKb.getHeight() - cropY });
+                writePng(dir.getChildFile("D2_02_ALLY1300_Keyboard_Closeup_2x.png"), kbCloseup);
+            }
+            proc.getKeyboardState().allNotesOff(1);
+
+            // 1200x850 native scale
+            ed->setSize(1200, 850);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+            writePng(dir.getChildFile("D2_06_ALLY1300_UI_1200x850.png"), renderComponentImage(*ed, 1.0f));
+
+            // Side-by-side Master vs D.2 Comparison sheet
+            const auto masterPath = juce::SystemStats::getEnvironmentVariable("ALLY_MASTER_CROP_PATH", {});
+            if (masterPath.isNotEmpty() && juce::File(masterPath).existsAsFile())
+            {
+                const auto masterImg = juce::ImageFileFormat::loadFrom(juce::File(masterPath));
+                if (masterImg.isValid() && masterImg.getHeight() > 0)
+                {
+                    const int targetH = 920;
+                    const int pad = 28;
+                    const int labelH = 44;
+                    const int leftW  = juce::roundToInt(static_cast<double>(masterImg.getWidth())
+                                                        * (static_cast<double>(targetH) / static_cast<double>(masterImg.getHeight())));
+                    const int rightW = juce::roundToInt(static_cast<double>(full780_2x.getWidth())
+                                                        * (static_cast<double>(targetH) / static_cast<double>(full780_2x.getHeight())));
+                    const int sheetW = pad * 3 + leftW + rightW;
+                    const int sheetH = pad * 2 + labelH + targetH;
+
+                    juce::Image compSheet(juce::Image::ARGB, sheetW, sheetH, true);
+                    juce::Graphics gc(compSheet);
+                    gc.fillAll(AllyGUI::EngineeredDepthTheme::Colors::bg);
+
+                    gc.setFont(AllyGUI::EngineeredDepthTheme::makeUiFont(18.0f, true));
+                    gc.setColour(AllyGUI::EngineeredDepthTheme::Colors::textSecondary);
+                    gc.drawText("APPROVED MASTER UI CROP (REFERENCE)",
+                                pad, pad, leftW, labelH - 8, juce::Justification::centredLeft);
+
+                    gc.setColour(AllyGUI::EngineeredDepthTheme::Colors::cyan);
+                    gc.drawText("LIVE COMPILED C++ / JUCE UI (CORRECTIERONDE D.2)",
+                                pad * 2 + leftW, pad, rightW, labelH - 8, juce::Justification::centredLeft);
+
+                    gc.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+                    gc.drawImage(masterImg, pad, pad + labelH, leftW, targetH,
+                                 0, 0, masterImg.getWidth(), masterImg.getHeight());
+                    gc.drawImage(full780_2x, pad * 2 + leftW, pad + labelH, rightW, targetH,
+                                 0, 0, full780_2x.getWidth(), full780_2x.getHeight());
+
+                    writePng(dir.getChildFile("D2_05_ALLY1300_Master_vs_D2_Comparison.png"), compSheet);
+                }
+            }
+        }
+
+        // 2. Alternate Active High-Dirt State (780x580 @ 2x)
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+            AllyPresets::applyPreset(proc.apvts, 3);
+            setParamPlainValue(proc.apvts, "stadsdeel", 2.0f);
+            setParamPlainValue(proc.apvts, "diepte", 0.78f);
+            setParamPlainValue(proc.apvts, "havenDirt", 0.72f);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.68f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 85.0f);
+            setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+            setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+            setParamPlainValue(proc.apvts, "masterVolume", -0.5f);
+
+            std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+            ed->setSize(780, 580);
+            ed->setCurrentOctaveSafe(1);
+            feedScopeAndMeter(proc, *ed, 38);
+
+            proc.getKeyboardState().allNotesOff(1);
+            proc.getKeyboardState().noteOn(1, 24, 0.95f);
+            proc.getKeyboardState().noteOn(1, 27, 0.90f);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+
+            writePng(dir.getChildFile("D2_07_ALLY1300_Active_State_780x580_2x.png"),
+                     renderComponentImage(*ed, 2.0f));
+        }
+
+        return 0;
+    }
+
     juce::UnitTestRunner runner;
     runner.setAssertOnFailure(false);
     runner.runTestsInCategory("AllyBass");

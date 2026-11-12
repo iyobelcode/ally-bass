@@ -212,22 +212,22 @@ void HeaderPanel::PresetSelectorButton::paintButton(juce::Graphics& g,
                                    enabled ? (hovered || down ? 0.35f : 0.16f) : 0.0f);
 
     // Inner text row: optional muted "PRESET" tag + active preset name (+ "*")
-    auto textArea = outer.reduced(9.0f, 2.0f);
+    auto textArea = outer.reduced(7.5f, 2.0f);
     textArea.setRight(outer.getRight() - chevronZoneW);
     if (textArea.getWidth() < 20.0f)
         return;
 
-    const float tagFontPx = juce::jlimit(8.0f, 10.5f, outer.getHeight() * 0.28f);
-    const float nameFontPx = juce::jlimit(9.2f, 12.2f, outer.getHeight() * 0.34f);
+    const float tagFontPx = juce::jlimit(7.8f, 10.2f, outer.getHeight() * 0.28f);
+    const float nameFontPx = juce::jlimit(8.8f, 11.8f, outer.getHeight() * 0.34f);
 
-    if (textArea.getWidth() > 125.0f)
+    if (textArea.getWidth() > 96.0f)
     {
-        const float tagW = juce::jlimit(34.0f, 44.0f, textArea.getWidth() * 0.22f);
+        const float tagW = juce::jlimit(32.0f, 42.0f, textArea.getWidth() * 0.24f);
         auto tagRect = textArea.removeFromLeft(tagW);
         g.setFont(EngineeredDepthTheme::makeUiFont(tagFontPx, false));
         g.setColour(enabled ? EngineeredDepthTheme::Colors::textMuted : EngineeredDepthTheme::Colors::disabled);
         g.drawFittedText("PRESET", tagRect.toNearestInt(), juce::Justification::centredLeft, 1, 0.85f);
-        textArea.removeFromLeft(5.0f);
+        textArea.removeFromLeft(4.0f);
     }
 
     const juce::String displayStr = presetNameText + (modifiedFlag ? " *" : "");
@@ -239,7 +239,7 @@ void HeaderPanel::PresetSelectorButton::paintButton(juce::Graphics& g,
                      textArea.toNearestInt(),
                      juce::Justification::centredLeft,
                      1,
-                     0.82f);
+                     0.78f);
 }
 
 // =============================================================================
@@ -603,45 +603,46 @@ void HeaderPanel::resized()
     const float padX = juce::jlimit(7.0f, 15.0f, w * 0.013f);
     const float padY = juce::jlimit(6.0f, 11.0f, h * 0.14f);
 
-    // 1. Emblem zone on left
-    const float emblemSize = juce::jmin(h - padY * 1.2f, 52.0f);
-    const float emblemW = emblemSize * 1.16f;
-    emblemBounds = juce::Rectangle<float>(chassisBounds.getX() + padX * 1.05f,
+    // 1. Emblem zone on left (generous presence matching master crop)
+    const float emblemSize = juce::jlimit(34.0f, 58.0f, h - padY * 1.15f);
+    const float emblemW = emblemSize * 1.15f;
+    emblemBounds = juce::Rectangle<float>(chassisBounds.getX() + padX * 0.90f,
                                           chassisBounds.getCentreY() - emblemSize * 0.5f,
                                           emblemW,
                                           emblemSize);
 
-    divider1X = emblemBounds.getRight() + juce::jlimit(5.0f, 13.0f, w * 0.011f);
+    divider1X = emblemBounds.getRight() + juce::jlimit(4.0f, 10.0f, w * 0.008f);
 
-    // 2. Wordmark ALLY / 1300 / SUB SYNTH
-    const float wordW = juce::jlimit(74.0f, 112.0f, h * 1.42f);
-    wordmarkBounds = juce::Rectangle<float>(divider1X + juce::jlimit(6.0f, 14.0f, w * 0.012f),
-                                            chassisBounds.getY() + padY * 0.60f,
+    // 2. Prominent Hero Wordmark ALLY / 1300 / SUB SYNTH (fills header height matching master proportions)
+    const float wordW = juce::jlimit(76.0f, 128.0f, w * 0.132f);
+    wordmarkBounds = juce::Rectangle<float>(divider1X + juce::jlimit(4.0f, 10.0f, w * 0.008f),
+                                            chassisBounds.getY() + padY * 0.30f,
                                             wordW,
-                                            h - padY * 1.20f);
+                                            h - padY * 0.60f);
 
-    divider2X = wordmarkBounds.getRight() + juce::jlimit(6.0f, 14.0f, w * 0.012f);
+    divider2X = wordmarkBounds.getRight() + juce::jlimit(6.0f, 12.0f, w * 0.0095f);
 
     // 3. Location vertical stack (ALMERE / POLDER / STAD / 036)
-    const float locW = juce::jlimit(46.0f, 66.0f, h * 0.85f);
-    locationBounds = juce::Rectangle<float>(divider2X + juce::jlimit(6.0f, 12.0f, w * 0.010f),
-                                            wordmarkBounds.getY(),
+    const float locW = juce::jlimit(42.0f, 58.0f, w * 0.068f);
+    locationBounds = juce::Rectangle<float>(divider2X + juce::jlimit(5.0f, 10.0f, w * 0.008f),
+                                            wordmarkBounds.getY() + padY * 0.15f,
                                             locW,
-                                            wordmarkBounds.getHeight());
+                                            wordmarkBounds.getHeight() - padY * 0.30f);
 
     // 4. Right Preset Toolbar: strictly < | > | PRESET Selector | Open | Save | Settings
-    const float btnSize = juce::jlimit(28.0f, 40.0f, h * 0.59f);
-    const float gap = juce::jlimit(4.0f, 8.0f, w * 0.007f);
-    const float mapMinW = juce::jlimit(42.0f, 150.0f, w * 0.095f);
+    // Compact button & capsule budget preserves generous middle Almere/Weerwater map viewport (~20-23%)
+    const float btnSize = juce::jlimit(25.0f, 36.0f, h * 0.485f);
+    const float gap = juce::jlimit(3.5f, 6.5f, w * 0.0055f);
+    const float mapMinW = juce::jlimit(68.0f, 220.0f, w * 0.145f);
     const float toolbarLeftMin = locationBounds.getRight() + mapMinW;
-    const float maxToolbarW = juce::jmax(280.0f, chassisBounds.getRight() - padX - toolbarLeftMin);
+    const float maxToolbarW = juce::jmax(270.0f, chassisBounds.getRight() - padX * 0.85f - toolbarLeftMin);
 
-    const float desiredComboW = juce::jlimit(165.0f, 300.0f, w * 0.305f);
+    const float desiredComboW = juce::jlimit(146.0f, 248.0f, w * 0.218f);
     const float fiveButtonsW = 5.0f * btnSize + 5.0f * gap;
-    const float comboW = juce::jmin(desiredComboW, juce::jmax(130.0f, maxToolbarW - fiveButtonsW));
+    const float comboW = juce::jmin(desiredComboW, juce::jmax(122.0f, maxToolbarW - fiveButtonsW));
     const float totalToolbarW = fiveButtonsW + comboW;
 
-    toolbarBounds = juce::Rectangle<float>(chassisBounds.getRight() - padX - totalToolbarW,
+    toolbarBounds = juce::Rectangle<float>(chassisBounds.getRight() - padX * 0.85f - totalToolbarW,
                                            chassisBounds.getCentreY() - btnSize * 0.5f,
                                            totalToolbarW,
                                            btnSize);
@@ -662,13 +663,16 @@ void HeaderPanel::resized()
     tx += btnSize + gap;
     settingsButton.setBounds(juce::roundToInt(tx), btnY, btnS, btnS);
 
-    // 5. Middle Slanted Almere Map Zone strictly between Location stack & Toolbar
-    const float mapStartX = locationBounds.getRight() + 4.0f;
-    const float mapEndX   = toolbarBounds.getX() - 4.0f;
+    // 5. Middle Slanted Almere Map Zone cleanly filling expanse between Location stack & Toolbar
+    const float mapStartX = locationBounds.getRight() + 2.0f;
+    const float mapEndX   = toolbarBounds.getX() - 2.0f;
     mapBounds = juce::Rectangle<float>(mapStartX,
                                        chassisBounds.getY() + 1.5f,
                                        juce::jmax(0.0f, mapEndX - mapStartX),
                                        h - 3.0f);
+
+    cachedW = 0;
+    cachedH = 0;
 }
 
 void HeaderPanel::drawChassis(juce::Graphics& g) const
@@ -782,24 +786,24 @@ void HeaderPanel::drawWordmark(juce::Graphics& g) const
     const float h = wordmarkBounds.getHeight();
     const float w = wordmarkBounds.getWidth();
 
-    // Scale font point sizes proportionally; NEVER squash horizontal scale on 1300!
-    const float allyPt = juce::jlimit(12.5f, 20.5f, h * 0.42f);
-    const float numPt  = juce::jlimit(11.8f, 19.5f, h * 0.40f);
-    const float subPt  = juce::jlimit(6.8f, 10.6f, h * 0.21f);
+    // Bold prominent branding hierarchy filling header height cleanly matching master crop
+    const float allyPt = juce::jlimit(14.5f, 25.5f, h * 0.445f);
+    const float numPt  = juce::jlimit(14.0f, 24.8f, h * 0.438f);   // natural 1.0 ratio!
+    const float subPt  = juce::jlimit(7.4f, 11.2f, h * 0.198f);
 
     const auto allyFont = EngineeredDepthTheme::makeUiFont(allyPt, true);
-    const auto numFont  = EngineeredDepthTheme::makeUiFont(numPt, true);   // natural 1.0 ratio!
+    const auto numFont  = EngineeredDepthTheme::makeUiFont(numPt, true);
     const auto subFont  = EngineeredDepthTheme::makeUiFont(subPt, false);
 
-    // Compute common optical width matching ALLY so ALLY, 1300, and SUB SYNTH align cleanly
+    // Optical block width matches ALLY cleanly across 1300 and tracked SUB SYNTH
     const float targetSpan = juce::jmin(w - 2.0f,
-                                        juce::jmax(measureNaturalInkSpan(allyFont, "ALLY", 0.09f),
-                                                   measureNaturalInkSpan(numFont, "1300", 0.14f)));
+                                        juce::jmax(measureNaturalInkSpan(allyFont, "ALLY", 0.12f),
+                                                   measureNaturalInkSpan(numFont, "1300", 0.19f)));
     const float startX = wordmarkBounds.getCentreX() - targetSpan * 0.5f;
 
-    const float yAllyBase = wordmarkBounds.getY() + h * 0.315f;
-    const float yNumBase  = wordmarkBounds.getY() + h * 0.680f;
-    const float ySubBase  = wordmarkBounds.getY() + h * 0.915f;
+    const float yAllyBase = wordmarkBounds.getY() + h * 0.305f;
+    const float yNumBase  = wordmarkBounds.getY() + h * 0.695f;
+    const float ySubBase  = wordmarkBounds.getY() + h * 0.935f;
 
     drawSpacedOpticalWord(g,
                           allyFont,
@@ -816,19 +820,17 @@ void HeaderPanel::drawWordmark(juce::Graphics& g) const
                           startX,
                           yNumBase,
                           targetSpan,
-                          EngineeredDepthTheme::Colors::cyan,
-                          0.75f);
+                          EngineeredDepthTheme::Colors::cyanBright.interpolatedWith(EngineeredDepthTheme::Colors::cyan, 0.52f),
+                          1.10f);
 
-    // SUB SYNTH centered strictly below ALLY / 1300
-    const float subW = juce::jmin(targetSpan * 0.96f,
-                                  measureNaturalInkSpan(subFont, "SUB SYNTH", 0.36f));
+    // SUB SYNTH centered strictly across optical brand width
     drawSpacedOpticalWord(g,
                           subFont,
                           "SUB SYNTH",
-                          wordmarkBounds.getCentreX() - subW * 0.5f,
+                          startX,
                           ySubBase,
-                          subW,
-                          EngineeredDepthTheme::Colors::textSecondary,
+                          targetSpan * 0.98f,
+                          EngineeredDepthTheme::Colors::textSecondary.withAlpha(0.94f),
                           0.0f);
 }
 
@@ -837,7 +839,7 @@ void HeaderPanel::drawLocationStack(juce::Graphics& g) const
     if (locationBounds.isEmpty())
         return;
 
-    const auto drawVerticalDivider = [&](float x)
+    const auto drawVerticalDivider = [&](float x, float maxAlpha)
     {
         const float divPad = chassisBounds.getHeight() * 0.16f;
         const float topY = chassisBounds.getY() + divPad;
@@ -845,20 +847,20 @@ void HeaderPanel::drawLocationStack(juce::Graphics& g) const
         juce::ColourGradient dg(juce::Colours::transparentBlack, x, topY,
                                 juce::Colours::transparentBlack, x, botY,
                                 false);
-        dg.addColour(0.25, EngineeredDepthTheme::Colors::textMuted.withAlpha(0.70f));
-        dg.addColour(0.75, EngineeredDepthTheme::Colors::textMuted.withAlpha(0.70f));
+        dg.addColour(0.25, EngineeredDepthTheme::Colors::textMuted.withAlpha(maxAlpha));
+        dg.addColour(0.75, EngineeredDepthTheme::Colors::textMuted.withAlpha(maxAlpha));
         g.setGradientFill(dg);
         g.drawLine(x, topY, x, botY, 1.0f);
     };
 
-    drawVerticalDivider(divider1X);
-    drawVerticalDivider(divider2X);
+    // Divider between brand wordmark and ALMERE stack matching master header
+    drawVerticalDivider(divider2X, 0.72f);
 
     static const char* lines[4] = { "ALMERE", "POLDER", "STAD", "036" };
     const float h = locationBounds.getHeight();
     const float insetY = h * 0.04f;
     const float rowH = (h - insetY * 2.0f) * 0.25f;
-    const float fontPx = juce::jlimit(7.8f, 11.2f, h * 0.220f);
+    const float fontPx = juce::jlimit(7.8f, 11.2f, h * 0.222f);
     g.setFont(EngineeredDepthTheme::makeDataFont(fontPx, false));
 
     for (int i = 0; i < 4; ++i)
@@ -883,9 +885,9 @@ void HeaderPanel::drawAlmereMapMotif(juce::Graphics& g) const
     const float yT = mapBounds.getY();
     const float yB = mapBounds.getBottom();
     const float h  = mapBounds.getHeight();
-    const float slant = juce::jmin(mapBounds.getWidth() * 0.28f, h * 0.44f);
+    const float slant = juce::jmin(mapBounds.getWidth() * 0.26f, h * 0.48f);
 
-    // Parallellogram viewport sloping up-right on left & right boundaries like master header
+    // Parallellogram map viewport sloping diagonally like the master bezel
     const juce::Point<float> pBL { xL,          yB };
     const juce::Point<float> pTL { xL + slant,  yT };
     const juce::Point<float> pTR { xR,          yT };
@@ -910,135 +912,221 @@ void HeaderPanel::drawAlmereMapMotif(juce::Graphics& g) const
     g.saveState();
     g.reduceClipRegion(trapClip);
 
-    // 1. Deep nocturnal map base gradient
-    juce::ColourGradient mapBg(EngineeredDepthTheme::Colors::black.interpolatedWith(EngineeredDepthTheme::Colors::bg, 0.70f),
+    // 1. Deep nocturnal polder map glass interior + glowing turquoise depth under Weerwater basin
+    juce::ColourGradient mapBg(juce::Colour(0xff02080d),
                                mapBounds.getCentreX(), yT,
-                               EngineeredDepthTheme::Colors::bg.interpolatedWith(EngineeredDepthTheme::Colors::surface1, 0.50f),
+                               juce::Colour(0xff071a26),
                                mapBounds.getCentreX(), yB,
                                false);
     g.setGradientFill(mapBg);
     g.fillPath(trapClip);
 
-    // 2. Almere city block/street clusters in subtle architectural cyan
-    juce::Path urbanGrid;
-    // Left district blocks (rotated ~-18 deg)
-    for (int col = 0; col <= 7; ++col)
+    // Ambient blue-cyan city glow centered over Stad / Weerwater shore
+    juce::ColourGradient cityWash(EngineeredDepthTheme::Colors::cyan.withAlpha(0.14f),
+                                  mPt(0.46f, 0.56f).x, mPt(0.46f, 0.56f).y,
+                                  juce::Colours::transparentBlack,
+                                  mPt(0.05f, 0.15f).x, mPt(0.05f, 0.15f).y,
+                                  true);
+    g.setGradientFill(cityWash);
+    g.fillPath(trapClip);
+
+    // 2. Fine Tier-1 Urban City Block Grids (Stad Centrum, Stedenwijk, Filmwijk, Parkwijk)
+    juce::Path fineBlocks;
+    // West / Stedenwijk dense tilted blocks
+    for (int col = 0; col <= 12; ++col)
     {
-        const float u = 0.04f + static_cast<float>(col) * 0.055f;
-        urbanGrid.startNewSubPath(mPt(u, 0.05f));
-        urbanGrid.lineTo(mPt(u - 0.10f, 0.78f));
+        const float u = 0.02f + static_cast<float>(col) * 0.036f;
+        fineBlocks.startNewSubPath(mPt(u, 0.02f));
+        fineBlocks.lineTo(mPt(u - 0.11f, 0.88f));
     }
-    for (int row = 0; row <= 5; ++row)
+    for (int row = 0; row <= 8; ++row)
     {
-        const float v = 0.12f + static_cast<float>(row) * 0.13f;
-        urbanGrid.startNewSubPath(mPt(0.02f, v));
-        urbanGrid.lineTo(mPt(0.45f, v + 0.10f));
+        const float v = 0.06f + static_cast<float>(row) * 0.105f;
+        fineBlocks.startNewSubPath(mPt(-0.02f, v));
+        fineBlocks.lineTo(mPt(0.48f, v + 0.12f));
     }
 
-    // North-east Filmwijk/Centrum blocks
+    // North-Central / Almere Stad & Centrum tight architectural matrix
+    for (int col = 0; col <= 10; ++col)
+    {
+        const float u = 0.42f + static_cast<float>(col) * 0.044f;
+        fineBlocks.startNewSubPath(mPt(u, -0.02f));
+        fineBlocks.lineTo(mPt(u - 0.08f, 0.62f));
+    }
+    for (int row = 0; row <= 7; ++row)
+    {
+        const float v = 0.04f + static_cast<float>(row) * 0.092f;
+        fineBlocks.startNewSubPath(mPt(0.38f, v + 0.05f));
+        fineBlocks.lineTo(mPt(0.92f, v - 0.07f));
+    }
+
+    // East / Filmwijk curved waterfront blocks
     for (int col = 0; col <= 6; ++col)
     {
-        const float u = 0.44f + static_cast<float>(col) * 0.068f;
-        urbanGrid.startNewSubPath(mPt(u, 0.02f));
-        urbanGrid.lineTo(mPt(u - 0.07f, 0.56f));
-    }
-    for (int row = 0; row <= 4; ++row)
-    {
-        const float v = 0.08f + static_cast<float>(row) * 0.12f;
-        urbanGrid.startNewSubPath(mPt(0.42f, v + 0.04f));
-        urbanGrid.lineTo(mPt(0.92f, v - 0.06f));
+        const float u = 0.72f + static_cast<float>(col) * 0.045f;
+        fineBlocks.startNewSubPath(mPt(u, 0.10f));
+        fineBlocks.lineTo(mPt(u + 0.05f, 0.68f));
     }
 
-    g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(0.55f));
-    g.strokePath(urbanGrid, juce::PathStrokeType(0.75f));
+    g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(0.46f));
+    g.strokePath(fineBlocks, juce::PathStrokeType(0.60f));
 
-    // 3. Diagonal Almere infrastructure arteries matching master_header_real.png
+    // 3. Tier-2 Distributor Parkways & Streets
+    juce::Path avenues;
+    avenues.startNewSubPath(mPt(0.06f, 0.24f));
+    avenues.quadraticTo(mPt(0.28f, 0.36f), mPt(0.54f, 0.18f));
+    avenues.lineTo(mPt(0.86f, 0.02f));
+
+    avenues.startNewSubPath(mPt(0.02f, 0.56f));
+    avenues.quadraticTo(mPt(0.24f, 0.66f), mPt(0.46f, 0.44f));
+
+    avenues.startNewSubPath(mPt(0.22f, 0.00f));
+    avenues.lineTo(mPt(0.08f, 0.96f));
+
+    avenues.startNewSubPath(mPt(0.64f, -0.02f));
+    avenues.quadraticTo(mPt(0.58f, 0.34f), mPt(0.70f, 0.56f));
+
+    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.28f));
+    g.strokePath(avenues, juce::PathStrokeType(0.80f));
+
+    // 4. Tier-3 Primary Glowing Infrastructure Ring (A6 / Hogering / Tussenring)
     juce::Path highways;
-    // Sweeping east-west curve across polder
-    highways.startNewSubPath(mPt(-0.02f, 0.72f));
-    highways.quadraticTo(mPt(0.28f, 0.28f), mPt(0.56f, 0.48f));
-    highways.quadraticTo(mPt(0.76f, 0.62f), mPt(0.98f, 0.10f));
-    // North-south central avenue crossing
-    highways.startNewSubPath(mPt(0.47f, -0.05f));
-    highways.lineTo(mPt(0.32f, 1.05f));
-    // Secondary diagonal spur
-    highways.startNewSubPath(mPt(0.14f, 0.05f));
-    highways.lineTo(mPt(0.45f, 0.88f));
-    highways.startNewSubPath(mPt(0.75f, 0.00f));
-    highways.lineTo(mPt(0.62f, 0.58f));
+    highways.startNewSubPath(mPt(-0.02f, 0.78f));
+    highways.quadraticTo(mPt(0.24f, 0.30f), mPt(0.52f, 0.44f));
+    highways.quadraticTo(mPt(0.75f, 0.56f), mPt(0.98f, 0.06f));
 
-    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.20f));
-    g.strokePath(highways, juce::PathStrokeType(2.4f));
-    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.65f));
-    g.strokePath(highways, juce::PathStrokeType(1.05f));
+    highways.startNewSubPath(mPt(0.46f, -0.04f));
+    highways.lineTo(mPt(0.29f, 1.04f));
 
-    // Intersection beacon kept cleanly outside Weerwater lake contour on northwest arterial junction
-    const auto hub = mPt(0.328f, 0.440f);
-    g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.75f));
-    g.fillEllipse(hub.x - 1.6f, hub.y - 1.6f, 3.2f, 3.2f);
+    highways.startNewSubPath(mPt(0.11f, 0.04f));
+    highways.lineTo(mPt(0.42f, 0.84f));
 
-    // 4. Glowing Weerwater Lake along bottom-right of map trapezoid (coastline shimmer concentrated along bay)
+    highways.startNewSubPath(mPt(0.78f, -0.02f));
+    highways.lineTo(mPt(0.63f, 0.55f));
+
+    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.18f));
+    g.strokePath(highways, juce::PathStrokeType(2.0f));
+    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.76f));
+    g.strokePath(highways, juce::PathStrokeType(0.85f));
+
+    // Arterial junction nodes kept strictly on land outside Weerwater coastline
+    for (const auto& jPt : { mPt(0.36f, 0.42f), mPt(0.21f, 0.38f), mPt(0.54f, 0.43f) })
+    {
+        g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.32f));
+        g.fillEllipse(jPt.x - 2.6f, jPt.y - 2.6f, 5.2f, 5.2f);
+        g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.86f));
+        g.fillEllipse(jPt.x - 1.2f, jPt.y - 1.2f, 2.4f, 2.4f);
+    }
+
+    // 5. Sculpted Weerwater Lake Basin (opaque abyssal water masks land roads beneath it cleanly!)
     juce::Path weerwater;
-    weerwater.startNewSubPath(mPt(0.41f, 0.74f));
-    weerwater.cubicTo(mPt(0.46f, 0.50f), mPt(0.60f, 0.45f), mPt(0.72f, 0.58f));
-    weerwater.cubicTo(mPt(0.83f, 0.66f), mPt(0.89f, 0.80f), mPt(0.84f, 1.05f));
-    weerwater.lineTo(mPt(0.42f, 1.05f));
-    weerwater.cubicTo(mPt(0.38f, 0.92f), mPt(0.39f, 0.82f), mPt(0.41f, 0.74f));
+    weerwater.startNewSubPath(mPt(0.38f, 0.78f));
+    weerwater.cubicTo(mPt(0.42f, 0.55f), mPt(0.54f, 0.52f), mPt(0.64f, 0.59f));
+    weerwater.cubicTo(mPt(0.71f, 0.64f), mPt(0.76f, 0.54f), mPt(0.84f, 0.59f)); // harbor peninsula/cove indent
+    weerwater.cubicTo(mPt(0.91f, 0.65f), mPt(0.90f, 0.85f), mPt(0.86f, 1.06f));
+    weerwater.lineTo(mPt(0.36f, 1.06f));
+    weerwater.cubicTo(mPt(0.33f, 0.95f), mPt(0.35f, 0.86f), mPt(0.38f, 0.78f));
     weerwater.closeSubPath();
 
-    const auto coastGlowCenter = mPt(0.49f, 0.72f);
-    const auto deepBayCorner   = mPt(0.86f, 1.04f);
-    juce::ColourGradient waterGlow(EngineeredDepthTheme::Colors::cyan.withAlpha(0.48f),
+    // Dark opaque water base stops road lines cleanly at the coastline
+    g.setColour(juce::Colour(0xff02090f));
+    g.fillPath(weerwater);
+
+    const auto coastGlowCenter = mPt(0.52f, 0.60f);
+    const auto deepBayCorner   = mPt(0.84f, 1.02f);
+    juce::ColourGradient waterGlow(EngineeredDepthTheme::Colors::cyan.withAlpha(0.34f),
                                    coastGlowCenter.x, coastGlowCenter.y,
-                                   EngineeredDepthTheme::Colors::black.withAlpha(0.92f),
+                                   juce::Colour(0xff02090e).withAlpha(0.96f),
                                    deepBayCorner.x, deepBayCorner.y,
                                    false);
-    waterGlow.addColour(0.42, EngineeredDepthTheme::Colors::cyan.withAlpha(0.20f));
-    waterGlow.addColour(0.76, EngineeredDepthTheme::Colors::surface1.withAlpha(0.72f));
+    waterGlow.addColour(0.32, EngineeredDepthTheme::Colors::cyan.withAlpha(0.14f));
+    waterGlow.addColour(0.70, juce::Colour(0xff04121b).withAlpha(0.90f));
     g.setGradientFill(waterGlow);
     g.fillPath(weerwater);
 
-    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.28f));
-    g.strokePath(weerwater, juce::PathStrokeType(2.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.86f));
-    g.strokePath(weerwater, juce::PathStrokeType(1.15f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    // Subtle interior bathymetric depth rings inside Weerwater
+    {
+        juce::Graphics::ScopedSaveState lakeClip(g);
+        g.reduceClipRegion(weerwater);
+        const auto lakeCx = mPt(0.62f, 0.84f);
+        for (int ring = 1; ring <= 3; ++ring)
+        {
+            const float s = 1.0f - static_cast<float>(ring) * 0.20f;
+            const auto tx = juce::AffineTransform::translation(-lakeCx.x, -lakeCx.y)
+                                .scaled(s, s)
+                                .translated(lakeCx.x, lakeCx.y);
+            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.20f - static_cast<float>(ring) * 0.045f));
+            g.strokePath(weerwater, juce::PathStrokeType(0.75f), tx);
+        }
+    }
 
-    // Edge vignette inside trapezoid so text & toolbar flanking never clash visually
-    juce::ColourGradient leftFade(EngineeredDepthTheme::Colors::bg.withAlpha(0.78f), xL, yT,
-                                  juce::Colours::transparentBlack, xL + mw * 0.16f, yT,
-                                  false);
+    // Glowing Weerwater shoreline contour
+    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.28f));
+    g.strokePath(weerwater, juce::PathStrokeType(2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.82f));
+    g.strokePath(weerwater, juce::PathStrokeType(1.05f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    // Soft vignette + glass overhang shadow along left/right slanted seams
+    juce::ColourGradient leftFade(EngineeredDepthTheme::Colors::bg.withAlpha(0.72f), xL, yT,
+                                  juce::Colours::transparentBlack, xL + mw * 0.14f, yT, false);
     g.setGradientFill(leftFade);
     g.fillPath(trapClip);
 
     juce::ColourGradient rightFade(juce::Colours::transparentBlack, xR - mw * 0.16f, yT,
-                                   EngineeredDepthTheme::Colors::bg.withAlpha(0.84f), xR, yT,
-                                   false);
+                                   EngineeredDepthTheme::Colors::bg.withAlpha(0.86f), xR, yT, false);
     g.setGradientFill(rightFade);
     g.fillPath(trapClip);
 
     g.restoreState();
 
-    // Crisp parallel diagonal steel-cyan boundaries enclosing map zone
-    juce::ColourGradient diagGrad(EngineeredDepthTheme::Colors::metalRimMid.withAlpha(0.65f),
+    // Crisp parallel diagonal steel-cyan bezel mullions enclosing map zone
+    juce::ColourGradient diagGrad(EngineeredDepthTheme::Colors::metalRimMid.withAlpha(0.68f),
                                   pBL.x, pBL.y,
-                                  EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.70f),
+                                  EngineeredDepthTheme::Colors::metalRimLight.withAlpha(0.78f),
                                   pTL.x, pTL.y,
                                   false);
     g.setGradientFill(diagGrad);
-    g.drawLine(pBL.x, pBL.y, pTL.x, pTL.y, 1.15f);
-    g.drawLine(pBR.x, pBR.y, pTR.x, pTR.y, 1.15f);
+    g.drawLine(pBL.x, pBL.y, pTL.x, pTL.y, 1.2f);
+    g.drawLine(pBR.x, pBR.y, pTR.x, pTR.y, 1.2f);
 }
 
-void HeaderPanel::paint(juce::Graphics& g)
+void HeaderPanel::renderStaticHeaderToCache(juce::Graphics& g) const
 {
-    if (chassisBounds.isEmpty())
-        return;
-
     drawChassis(g);
     drawAllyEmblem(g);
     drawWordmark(g);
     drawLocationStack(g);
     drawAlmereMapMotif(g);
+}
+
+void HeaderPanel::paint(juce::Graphics& g)
+{
+    if (chassisBounds.isEmpty() || getWidth() <= 0 || getHeight() <= 0)
+        return;
+
+    const float scale = juce::jlimit(1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const int w = getWidth();
+    const int h = getHeight();
+
+    if (!cachedStaticHeader.isValid()
+        || cachedW != w
+        || cachedH != h
+        || std::abs(scale - cachedScale) > 0.01f)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedStaticHeader = juce::Image(juce::Image::ARGB, rw, rh, true);
+
+        juce::Graphics cacheG(cachedStaticHeader);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        renderStaticHeaderToCache(cacheG);
+
+        cachedW = w;
+        cachedH = h;
+        cachedScale = scale;
+    }
+
+    g.drawImage(cachedStaticHeader, 0, 0, w, h, 0, 0, cachedStaticHeader.getWidth(), cachedStaticHeader.getHeight());
 }
 
 } // namespace AllyGUI

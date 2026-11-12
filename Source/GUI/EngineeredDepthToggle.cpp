@@ -198,20 +198,23 @@ void EngineeredDepthToggle::HardwareButton::paintButton(juce::Graphics& g,
                       outerGlowR * 2.0f,
                       outerGlowR * 2.0f);
 
-        // Dark recessed housing + bright outer halo ring + vibrant hot center core
-        g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.88f));
-        g.fillEllipse(ledRect);
+        // Sculpted dark recessed metal collar + bright halo ring + luminous jewel dome
+        g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.95f));
+        g.fillEllipse(ledRect.expanded(1.2f));
+        g.setColour(EngineeredDepthTheme::Colors::metalRimMid.withAlpha(0.65f));
+        g.drawEllipse(ledRect.expanded(1.0f), 0.9f);
 
-        g.setColour(palette.primary.withAlpha(0.92f));
-        g.drawEllipse(ledRect.reduced(0.6f), juce::jmax(1.1f, ledRect.getWidth() * 0.085f));
+        g.setColour(palette.primary.withAlpha(0.94f));
+        g.drawEllipse(ledRect.reduced(0.6f), juce::jmax(1.2f, ledRect.getWidth() * 0.095f));
 
-        const auto coreRect = ledRect.reduced(ledRect.getWidth() * 0.19f);
+        const auto coreRect = ledRect.reduced(ledRect.getWidth() * 0.18f);
         juce::ColourGradient coreGrad(EngineeredDepthTheme::Colors::textPrimary,
-                                      coreRect.getCentreX(), coreRect.getCentreY(),
+                                      coreRect.getCentreX() - coreRect.getWidth() * 0.12f,
+                                      coreRect.getCentreY() - coreRect.getHeight() * 0.12f,
                                       palette.primary,
                                       coreRect.getRight(), coreRect.getCentreY(),
                                       true);
-        coreGrad.addColour(0.32, palette.coreHighlight);
+        coreGrad.addColour(0.36, palette.coreHighlight);
         g.setGradientFill(coreGrad);
         g.fillEllipse(coreRect);
     }
