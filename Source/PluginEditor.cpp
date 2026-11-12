@@ -24,7 +24,7 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     setupHeaderAndModals();
 
     // 5. Engineered Depth Interactive Keyboard & Octave Controller (Stap C.4C)
-    keyboardPanel = std::make_unique<AllyGUI::KeyboardPanel>(audioProcessor.getKeyboardState());
+    keyboardPanel = std::make_unique<AllyGUI::KeyboardPanel>(audioProcessor.getKeyboardState(), &audioProcessor);
     keyboardPanel->onOctaveStepRequested = [this](int delta)
     {
         setCurrentOctaveSafe(currentOctave + delta);

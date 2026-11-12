@@ -1510,6 +1510,305 @@ public:
     }
 };
 
+class ConcurrencyRealtimeSafetyD1CTests final : public juce::UnitTest
+{
+public:
+    ConcurrencyRealtimeSafetyD1CTests()
+        : juce::UnitTest("ALLY1300 Concurrency, Realtime Safety & Attack Phase (D.1C)", "AllyBass") {}
+
+    void runTest() override
+    {
+        beginTest("Direct internal envelope phase verifies exact single-sample Attack timing independent of oscillator");
+        {
+            const double sampleRates[] = { 44100.0, 48000.0, 96000.0 };
+            const float attacksMs[] = { 1.0f, 3.5f, 8.0f, 85.0f, 300.0f };
+            const float velocities[] = { 0.1f, 0.5f, 1.0f };
+
+            for (double sr : sampleRates)
+            {
+                for (float attackMs : attacksMs)
+                {
+                    for (float vel : velocities)
+                    {
+                        AllyBassAudioProcessor proc;
+                        proc.setPlayConfigDetails(0, 2, sr, 512);
+                        proc.prepareToPlay(sr, 512);
+                        setParamPlainValue(proc.apvts, "attack", attackMs);
+                        setParamPlainValue(proc.apvts, "release", 250.0f);
+                        setParamPlainValue(proc.apvts, "polderPunch", 0.0f);
+
+                        // Exact expected sample count to reach envLevel >= 1.0f for normalized rate 1/N
+                        const float attackSec = juce::jmax(0.001f, attackMs * 0.001f);
+                        const float exactRate = 1.0f / juce::jmax(1.0f, attackSec * static_cast<float>(sr));
+                        int expectedSamples = 0;
+                        float simLevel = 0.0f;
+                        while (simLevel < 1.0f && expectedSamples < 100000)
+                        {
+                            simLevel += exactRate;
+                            ++expectedSamples;
+                        }
+                        expect(expectedSamples >= 1, "Expected attack sample count must be >= 1");
+
+                        const auto noteOnMsg = juce::MidiMessage::noteOn(1, 36, vel);
+                        const float expectedMidiVel = noteOnMsg.getFloatVelocity();
+
+                        // Step exact N - 1 samples across a first block, then 1 single sample in the next block
+                        const int preSamples = expectedSamples - 1;
+                        if (preSamples > 0)
+                        {
+                            juce::AudioBuffer<float> preBuf(2, preSamples);
+                            juce::MidiBuffer midi;
+                            midi.addEvent(noteOnMsg, 0);
+                            preBuf.clear();
+                            proc.processBlock(preBuf, midi);
+
+                            expectEquals(proc.getEnvelopeStateInt(), 1); // EnvelopeState::Attack
+                            expect(proc.getEnvelopeLevel() < 1.0f,
+                                   "At sample N-1 internal envelope level must still be in Attack (< 1.0)");
+                        }
+
+                        juce::AudioBuffer<float> finalBuf(2, 1);
+                        juce::MidiBuffer finalMidi;
+                        if (preSamples == 0)
+                            finalMidi.addEvent(noteOnMsg, 0);
+                        finalBuf.clear();
+                        proc.processBlock(finalBuf, finalMidi);
+
+                        expectEquals(proc.getEnvelopeStateInt(), 2); // EnvelopeState::Sustain
+                        expectWithinAbsoluteError(proc.getEnvelopeLevel(), 1.0f, 1e-6f);
+                        expectWithinAbsoluteError(proc.getCurrentVelocityGain(), expectedMidiVel, 1e-5f);
+                    }
+                }
+            }
+        }
+
+        beginTest("Triple-buffered scope and output meter remain snapshot-consistent across SR, BS 32..16384, and editor lifecycle");
+        {
+            const int blockSizes[] = { 32, 256, 1024, 4096, 16384 };
+            for (int bs : blockSizes)
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, bs);
+                proc.prepareToPlay(48000.0, bs);
+                setParamPlainValue(proc.apvts, "diepte", 0.0f);
+                setParamPlainValue(proc.apvts, "polderPunch", 0.0f);
+                setParamPlainValue(proc.apvts, "havenDirt", 0.0f);
+                setParamPlainValue(proc.apvts, "attack", 1.0f);
+                setParamPlainValue(proc.apvts, "masterVolume", 0.0f);
+
+                std::atomic<bool> stop { false };
+                std::atomic<int> tornFrames { 0 };
+                std::atomic<bool> sawNonFinite { false };
+                std::atomic<uint64_t> prevMeterCounter { 0 };
+                std::atomic<bool> counterWentBackwards { false };
+
+                juce::AudioBuffer<float> buf(2, bs);
+                juce::MidiBuffer midi;
+                midi.addEvent(juce::MidiMessage::noteOn(1, 69, 1.0f), 0); // 440 Hz steady sine
+                buf.clear();
+                proc.processBlock(buf, midi);
+                midi.clear();
+
+                std::thread consumer([&]()
+                {
+                    std::array<float, 1536> snap {};
+                    while (!stop.load(std::memory_order_acquire))
+                    {
+                        proc.getVisualizerData(snap.data(), 1536);
+                        for (size_t i = 0; i < snap.size(); ++i)
+                        {
+                            if (!std::isfinite(snap[i]))
+                                sawNonFinite.store(true, std::memory_order_relaxed);
+                            if (i > 0 && std::abs(snap[i] - snap[i - 1]) > 0.25f)
+                            {
+                                tornFrames.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            }
+                        }
+
+                        const auto m = proc.peekOutputMeterMetrics();
+                        if (!std::isfinite(m.peakLinear) || !std::isfinite(m.rmsLinear))
+                            sawNonFinite.store(true, std::memory_order_relaxed);
+                        const uint64_t prev = prevMeterCounter.load(std::memory_order_relaxed);
+                        if (m.updateCounter < prev)
+                            counterWentBackwards.store(true, std::memory_order_relaxed);
+                        prevMeterCounter.store(m.updateCounter, std::memory_order_relaxed);
+                    }
+                });
+
+                const int numBlocks = (bs <= 256) ? 200 : 80;
+                for (int b = 0; b < numBlocks; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                }
+
+                stop.store(true, std::memory_order_release);
+                consumer.join();
+
+                expectEquals(tornFrames.load(), 0);
+                expect(!sawNonFinite.load(), "Consumer must never observe NaN/Inf floats");
+                expect(!counterWentBackwards.load(), "Meter counter must remain monotonic");
+                expectEquals(static_cast<int>(proc.getVisualizerWriteCounter()), numBlocks + 1);
+            }
+
+            // Editor open/close/reopen + sample-rate change during live audio processing
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+
+            juce::AudioBuffer<float> buf(2, 256);
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+            buf.clear();
+            proc.processBlock(buf, midi);
+            midi.clear();
+
+            for (int cycle = 0; cycle < 3; ++cycle)
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
+                expect(ed != nullptr);
+                ed->setSize(780, 580);
+                buf.clear();
+                proc.processBlock(buf, midi);
+                std::array<float, 1536> snap {};
+                proc.getVisualizerData(snap.data(), 1536);
+                expect(std::isfinite(snap.back()), "Scope snapshot after editor open must be valid");
+                ed.reset();
+                buf.clear();
+                proc.processBlock(buf, midi);
+            }
+
+            proc.releaseResources();
+            proc.prepareToPlay(96000.0, 512);
+            std::array<float, 1536> zeroSnap {};
+            proc.getVisualizerData(zeroSnap.data(), 1536);
+            float peakAfterReset = 0.0f;
+            for (float s : zeroSnap)
+                peakAfterReset = juce::jmax(peakAfterReset, std::abs(s));
+            expectWithinAbsoluteError(peakAfterReset, 0.0f, 1e-6f);
+        }
+
+        beginTest("Bounded GUI->Audio MIDI queue prevents stuck notes on overflow, rapid chords, and DAW MIDI sync");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+            proc.prepareToPlay(48000.0, 256);
+            setParamPlainValue(proc.apvts, "attack", 1.0f);
+            setParamPlainValue(proc.apvts, "release", 15.0f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 0.0f);
+
+            // 1. Flood queue beyond its 256-event capacity without running processBlock, then release all notes
+            for (int i = 0; i < 420; ++i)
+            {
+                const int note = 36 + (i % 12);
+                proc.getKeyboardState().noteOn(1, note, 0.9f);
+                if (i < 400)
+                    proc.getKeyboardState().noteOff(1, note, 0.0f);
+            }
+            expect(proc.getGuiMidiQueueOverflowCount() > 0,
+                   "Burst > 256 GUI events must exercise bounded overflow path");
+
+            proc.getKeyboardState().allNotesOff(1);
+
+            juce::AudioBuffer<float> buf(2, 256);
+            juce::MidiBuffer emptyMidi;
+            for (int b = 0; b < 30; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, emptyMidi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 0); // EnvelopeState::Idle (zero stuck notes)
+            float tailPeak = 0.0f;
+            for (int s = 0; s < buf.getNumSamples(); ++s)
+                tailPeak = juce::jmax(tailPeak, std::abs(buf.getSample(0, s)));
+            expect(tailPeak < 1e-4f, "Audio output must decay completely after overflowed allNotesOff");
+
+            // 2. Simultaneous chord note-on/note-off ordering & release
+            proc.getKeyboardState().noteOn(1, 36, 0.9f);
+            proc.getKeyboardState().noteOn(1, 40, 0.9f);
+            proc.getKeyboardState().noteOn(1, 43, 0.9f);
+            buf.clear();
+            proc.processBlock(buf, emptyMidi);
+            expect(proc.getEnvelopeStateInt() != 0, "GUI note chord must trigger synth audio");
+            proc.getKeyboardState().noteOff(1, 36, 0.0f);
+            proc.getKeyboardState().noteOff(1, 40, 0.0f);
+            buf.clear();
+            proc.processBlock(buf, emptyMidi);
+            expectEquals(proc.getEnvelopeStateInt(), 2); // Note 43 still held -> Sustain
+            proc.getKeyboardState().noteOff(1, 43, 0.0f);
+            for (int b = 0; b < 25; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, emptyMidi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 0); // Released cleanly
+
+            // 3. DAW MIDI -> KeyboardState visual sync without loopback
+            juce::MidiBuffer dawMidi;
+            dawMidi.addEvent(juce::MidiMessage::noteOn(1, 41, 0.9f), 0);
+            buf.clear();
+            proc.processBlock(buf, dawMidi);
+            dawMidi.clear();
+
+            uint64_t extVer = 0;
+            std::array<uint64_t, 2> extMask {};
+            proc.syncExternalMidiToKeyboardState(extVer, extMask);
+            expect(proc.getKeyboardState().isNoteOn(1, 41),
+                   "External DAW Note-On must light corresponding key on KeyboardState");
+
+            dawMidi.addEvent(juce::MidiMessage::noteOff(1, 41), 0);
+            buf.clear();
+            proc.processBlock(buf, dawMidi);
+            proc.syncExternalMidiToKeyboardState(extVer, extMask);
+            expect(!proc.getKeyboardState().isNoteOn(1, 41),
+                   "External DAW Note-Off must clear key without stuck note");
+        }
+
+        beginTest("Concurrent preset switching, oversized blocks with Overdrive036, and parameter sanitization");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 48000.0, 256); // Prepared for 256 samples
+            proc.prepareToPlay(48000.0, 256);
+
+            std::atomic<bool> stop { false };
+            std::thread presetThread([&]()
+            {
+                for (int i = 0; i < 42 && !stop.load(std::memory_order_acquire); ++i)
+                {
+                    proc.setCurrentProgram(i % proc.getNumPrograms());
+                    std::this_thread::sleep_for(std::chrono::microseconds(250));
+                }
+            });
+
+            // Feed normal AND oversized 2048-sample blocks while presets toggle Overdrive036/MonoLock/Stadsdeel
+            juce::AudioBuffer<float> bigBuf(2, 2048);
+            juce::MidiBuffer midi;
+            for (int b = 0; b < 30; ++b)
+            {
+                midi.clear();
+                if (b % 5 == 0)
+                    midi.addEvent(juce::MidiMessage::noteOn(1, 36 + (b % 12), 0.9f), 0);
+                else if (b % 5 == 4)
+                    midi.addEvent(juce::MidiMessage::allNotesOff(1), 100);
+
+                bigBuf.clear();
+                proc.processBlock(bigBuf, midi);
+
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    const float* ptr = bigBuf.getReadPointer(ch);
+                    for (int s = 0; s < bigBuf.getNumSamples(); ++s)
+                        expect(std::isfinite(ptr[s]), "Output must remain finite across concurrent presets and chunked Overdrive036");
+                }
+            }
+
+            stop.store(true, std::memory_order_release);
+            presetThread.join();
+        }
+    }
+};
+
 template <typename ComponentType>
 ComponentType* findChildOfType(juce::Component& root)
 {
@@ -2123,6 +2422,7 @@ static MidiGlideAndAudioTests midiGlideAndAudioTests;
 static PolderPunchTests polderPunchTests;
 static MonoLockDspTests monoLockDspTests;
 static AttackEnvelopeD1BTests attackEnvelopeD1BTests;
+static ConcurrencyRealtimeSafetyD1CTests concurrencyRealtimeSafetyD1CTests;
 static EngineeredDepthTests engineeredDepthTests;
 
 class HeaderBrandingAndPresetTests final : public juce::UnitTest

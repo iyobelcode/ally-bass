@@ -1,10 +1,14 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "EngineeredDepthTheme.h"
+
+class AllyBassAudioProcessor;
 
 namespace AllyGUI
 {
@@ -49,11 +53,13 @@ private:
  * Sleek Engineered Depth chassis containing the compact octave controller (- OCT: C2 +)
  * and the interactive 3-octave keyboard bed matching ALLY1300_APPROVED_MASTER_FULL.png.
  */
-class KeyboardPanel final : public juce::Component
+class KeyboardPanel final : public juce::Component,
+                            private juce::Timer
 {
 public:
-    explicit KeyboardPanel(juce::MidiKeyboardState& keyboardState);
-    ~KeyboardPanel() override = default;
+    explicit KeyboardPanel(juce::MidiKeyboardState& keyboardState,
+                           AllyBassAudioProcessor* processorPtr = nullptr);
+    ~KeyboardPanel() override;
 
     void setOctaveDisplay(int octaveIndex, int minOctave, int maxOctave);
 
@@ -85,6 +91,12 @@ private:
         bool increment = false;
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OctaveStepButton)
     };
+
+    void timerCallback() override;
+
+    AllyBassAudioProcessor* processor = nullptr;
+    uint64_t lastExternalMidiVersion = 0;
+    std::array<uint64_t, 2> appliedExternalMidiMask {};
 
     EngineeredDepthKeyboard keyboard;
     OctaveStepButton btnDown { false };

@@ -1,4 +1,5 @@
 #include "KeyboardPanel.h"
+#include "../PluginProcessor.h"
 
 namespace AllyGUI
 {
@@ -313,8 +314,10 @@ void KeyboardPanel::OctaveStepButton::paintButton(juce::Graphics& g,
 }
 
 // ==============================================================================
-KeyboardPanel::KeyboardPanel(juce::MidiKeyboardState& keyboardState)
-    : keyboard(keyboardState)
+KeyboardPanel::KeyboardPanel(juce::MidiKeyboardState& keyboardState,
+                             AllyBassAudioProcessor* processorPtr)
+    : processor(processorPtr),
+      keyboard(keyboardState)
 {
     setInterceptsMouseClicks(false, true);
     setWantsKeyboardFocus(false);
@@ -337,6 +340,23 @@ KeyboardPanel::KeyboardPanel(juce::MidiKeyboardState& keyboardState)
     addAndMakeVisible(keyboard);
 
     setOctaveDisplay(2, 0, 5);
+
+    if (processor != nullptr)
+    {
+        processor->syncExternalMidiToKeyboardState(lastExternalMidiVersion, appliedExternalMidiMask);
+        startTimerHz(30);
+    }
+}
+
+KeyboardPanel::~KeyboardPanel()
+{
+    stopTimer();
+}
+
+void KeyboardPanel::timerCallback()
+{
+    if (processor != nullptr)
+        processor->syncExternalMidiToKeyboardState(lastExternalMidiVersion, appliedExternalMidiMask);
 }
 
 void KeyboardPanel::setOctaveDisplay(int octaveIndex, int minOctave, int maxOctave)

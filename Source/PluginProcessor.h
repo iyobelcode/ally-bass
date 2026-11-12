@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_dsp/juce_dsp.h>
@@ -13,7 +16,8 @@
 
 class AllyBassAudioProcessor : public juce::AudioProcessor,
                                private juce::AudioProcessorValueTreeState::Listener,
-                               private juce::ValueTree::Listener
+                               private juce::ValueTree::Listener,
+                               private juce::MidiKeyboardState::Listener
 {
 public:
     AllyBassAudioProcessor();
@@ -85,11 +89,72 @@ public:
     OutputMeterMetrics consumeOutputMeterMetrics() noexcept;
     void resetOutputTelemetry() noexcept;
 
-    // MIDI Keyboard State (for on-screen & QWERTY computer keyboard)
+    // MIDI Keyboard State (message/GUI thread owner; bridged lock-free to audio thread)
     juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
+    uint64_t getExternalMidiVersion() const noexcept { return externalMidiVersion.load(std::memory_order_acquire); }
+    void syncExternalMidiToKeyboardState(uint64_t& inOutLastVersion,
+                                         std::array<uint64_t, 2>& inOutAppliedExternalMask);
+    uint64_t getGuiMidiQueueOverflowCount() const noexcept { return guiQueueOverflowCount.load(std::memory_order_acquire); }
+
+    // Read-only DSP Envelope inspection accessors (D.1B/D.1C single-sample Attack verification)
+    int getEnvelopeStateInt() const noexcept { return static_cast<int>(envState); }
+    float getEnvelopeLevel() const noexcept { return envLevel; }
+    float getCurrentVelocityGain() const noexcept { return currentVelocityGain; }
 
 private:
+    static constexpr int guiMidiQueueCapacity = 256;
+    static_assert((guiMidiQueueCapacity & (guiMidiQueueCapacity - 1)) == 0,
+                  "guiMidiQueueCapacity must be a power of two");
+
+    static constexpr uint8_t kTripleSlotMask = 0x03u;
+    static constexpr uint8_t kTripleDirtyBit = 0x04u;
+
+    struct GuiMidiEvent
+    {
+        bool isNoteOn = false;
+        uint8_t channel = 1;
+        uint8_t note = 0;
+        float velocity = 0.0f;
+    };
+
+    struct OutputMeterBlockSnapshot
+    {
+        float peakLinear      = 0.0f;
+        float rmsLinear       = 0.0f;
+        float leftPeakLinear  = 0.0f;
+        float rightPeakLinear = 0.0f;
+        int   channelCount    = 2;
+        uint64_t updateCounter = 0;
+    };
+
     juce::MidiKeyboardState keyboardState;
+
+    // Lock-free SPSC GUI -> Audio MIDI queue + authoritative 128-note atomic reconciliation bitmask
+    std::array<GuiMidiEvent, guiMidiQueueCapacity> guiToAudioMidiQueue {};
+    std::atomic<uint32_t> guiMidiWriteIdx { 0 };
+    std::atomic<uint32_t> guiMidiReadIdx { 0 };
+    std::array<std::atomic<uint64_t>, 2> guiDesiredNotesMask {};
+    std::atomic<bool> guiMidiOverflowPending { false };
+    std::atomic<uint64_t> guiQueueOverflowCount { 0 };
+    bool suppressGuiMidiForwarding = false;
+
+    // Audio-thread private GUI held-note tracking + lock-free Audio -> GUI DAW MIDI mirror
+    std::array<uint64_t, 2> audioGuiHeldNotesMask {};
+    std::array<uint64_t, 2> audioExternalNotesMask {};
+    std::array<std::atomic<uint64_t>, 2> externalMidiNotesMask {};
+    std::atomic<uint64_t> externalMidiVersion { 0 };
+
+    // Cached APVTS raw parameter pointers (avoid string-map lookups in realtime audio thread)
+    const std::atomic<float>* rawDiepte = nullptr;
+    const std::atomic<float>* rawPolderPunch = nullptr;
+    const std::atomic<float>* rawHavenDirt = nullptr;
+    const std::atomic<float>* rawWaterwijkGlide = nullptr;
+    const std::atomic<float>* rawMasterVolume = nullptr;
+    const std::atomic<float>* rawAttack = nullptr;
+    const std::atomic<float>* rawRelease = nullptr;
+    const std::atomic<float>* rawStadsdeel = nullptr;
+    const std::atomic<float>* rawOverdrive036 = nullptr;
+    const std::atomic<float>* rawMonoLock1300 = nullptr;
 
     // DSP Modules
     AllyDSP::WaterwijkGlide waterwijkGlide;
@@ -112,25 +177,38 @@ private:
     float currentVelocityGain = 1.0f;
     float velocitySmoothCoeff = 0.01f;
 
-    // Lock-free Visualizer Ring Buffer & Post-Output Meter Atomics
-    std::array<std::atomic<float>, visualizerBufferSize> visualizerBuffer {};
-    std::atomic<int> visualizerWriteIndex { 0 };
+    // Wait-Free 3-Slot Triple-Buffer Scope Snapshot Mailbox + Audio-Private History
+    std::array<float, visualizerBufferSize> scopeHistory {};
+    int scopeHistoryWritePos = 0;
+    std::array<std::array<float, visualizerBufferSize>, 3> scopeTripleSlots {};
+    uint8_t scopeProducerSlot = 0;
+    uint8_t scopeConsumerSlot = 1;
+    std::atomic<uint8_t> scopeTripleMiddle { 2 };
     std::atomic<uint64_t> visualizerWriteCounter { 0 };
     std::atomic<float> currentSubLevel { 0.0f };
     std::atomic<double> currentSampleRateHz { 44100.0 };
 
-    std::atomic<float> outputLastBlockPeak { 0.0f };
-    std::atomic<float> outputLastBlockRms { 0.0f };
+    // Wait-Free 3-Slot Triple-Buffer Output Meter Block + Atomic Latched Transients
+    std::array<OutputMeterBlockSnapshot, 3> meterTripleSlots {};
+    uint8_t meterProducerSlot = 0;
+    mutable uint8_t meterConsumerSlot = 1;
+    mutable std::atomic<uint8_t> meterTripleMiddle { 2 };
+    uint64_t audioMeterSeq = 0;
+
     std::atomic<float> outputPeakLatched { 0.0f };
     std::atomic<float> outputRmsLatched { 0.0f };
-    std::atomic<float> outputLeftPeak { 0.0f };
-    std::atomic<float> outputRightPeak { 0.0f };
-    std::atomic<int>   outputChannelCount { 2 };
     std::atomic<bool>  outputClipLatched { false };
     std::atomic<uint64_t> outputMeterCounter { 0 };
 
     void handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount);
     void updateEnvelopeRates(float attackMs, float releaseMs);
+    void publishScopeHistoryToTripleBuffer() noexcept;
+    OutputMeterMetrics pullLatestMeterBlock() const noexcept;
+
+    // MidiKeyboardState::Listener (serialized off-audio-thread by keyboardState's internal lock)
+    void handleNoteOn(juce::MidiKeyboardState* source, int midiChannel, int midiNoteNumber, float velocity) override;
+    void handleNoteOff(juce::MidiKeyboardState* source, int midiChannel, int midiNoteNumber, float velocity) override;
+    void pushGuiMidiEvent(const GuiMidiEvent& ev) noexcept;
 
     // APVTS & ValueTree listeners for lock-free parameter edit / preset modified tracking
     void parameterChanged(const juce::String& parameterID, float newValue) override;

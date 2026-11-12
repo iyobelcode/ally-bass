@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_core/juce_core.h>
-#include <vector>
+#include <array>
+#include <cmath>
 
 namespace AllyDSP
 {
@@ -8,20 +9,23 @@ namespace AllyDSP
 class WaterwijkGlide
 {
 public:
+    static constexpr int maxActiveNotes = 128;
+
     WaterwijkGlide() = default;
 
     void prepare(double sampleRate)
     {
-        currentSampleRate = sampleRate;
+        currentSampleRate = sampleRate > 1.0 ? sampleRate : 44100.0;
         reset();
     }
 
     void reset()
     {
-        activeNotes.clear();
+        activeNoteCount = 0;
         currentFrequency = 0.0f;
         targetFrequency = 0.0f;
         currentVelocity = 0.0f;
+        glideCoeff = 1.0f;
         isNoteActive = false;
         isLegato = false;
         triggerTransient = false;
@@ -30,11 +34,25 @@ public:
 
     void noteOn(int midiNoteNumber, float velocity, float glideTimeMs)
     {
-        // Monofone note stack: verwijder eventueel duplicaat en voeg nieuwe noot bovenaan toe
-        auto it = std::find(activeNotes.begin(), activeNotes.end(), midiNoteNumber);
-        if (it != activeNotes.end())
-            activeNotes.erase(it);
-        activeNotes.push_back(midiNoteNumber);
+        // Monofone note stack op vaste stack-array (nul heap-allocaties in realtime audiothread)
+        for (int i = 0; i < activeNoteCount; ++i)
+        {
+            if (activeNotes[static_cast<size_t>(i)] == midiNoteNumber)
+            {
+                for (int j = i + 1; j < activeNoteCount; ++j)
+                    activeNotes[static_cast<size_t>(j - 1)] = activeNotes[static_cast<size_t>(j)];
+                --activeNoteCount;
+                break;
+            }
+        }
+
+        if (activeNoteCount >= maxActiveNotes)
+        {
+            for (int j = 1; j < activeNoteCount; ++j)
+                activeNotes[static_cast<size_t>(j - 1)] = activeNotes[static_cast<size_t>(j)];
+            --activeNoteCount;
+        }
+        activeNotes[static_cast<size_t>(activeNoteCount++)] = midiNoteNumber;
 
         float targetFreq = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(midiNoteNumber));
         currentVelocity = velocity;
@@ -65,11 +83,18 @@ public:
 
     void noteOff(int midiNoteNumber, float glideTimeMs = 0.0f)
     {
-        auto it = std::find(activeNotes.begin(), activeNotes.end(), midiNoteNumber);
-        if (it != activeNotes.end())
-            activeNotes.erase(it);
+        for (int i = 0; i < activeNoteCount; ++i)
+        {
+            if (activeNotes[static_cast<size_t>(i)] == midiNoteNumber)
+            {
+                for (int j = i + 1; j < activeNoteCount; ++j)
+                    activeNotes[static_cast<size_t>(j - 1)] = activeNotes[static_cast<size_t>(j)];
+                --activeNoteCount;
+                break;
+            }
+        }
 
-        if (activeNotes.empty())
+        if (activeNoteCount == 0)
         {
             isNoteActive = false;
             isLegato = false;
@@ -77,7 +102,7 @@ public:
         else
         {
             // Als er nog een eerder vastgehouden noot in de stack zit: terugkeren (en gliden indien aan)
-            int prevNote = activeNotes.back();
+            int prevNote = activeNotes[static_cast<size_t>(activeNoteCount - 1)];
             float prevFreq = static_cast<float>(juce::MidiMessage::getMidiNoteInHertz(prevNote));
             targetFrequency = prevFreq;
             isLegato = (glideTimeMs > 0.001f);
@@ -114,7 +139,7 @@ public:
     // Advances frequency by one sample and returns the current instantaneous pitch
     float processNextFrequency()
     {
-        if (!isNoteActive && activeNotes.empty())
+        if (!isNoteActive && activeNoteCount == 0)
             return targetFrequency;
 
         if (glideCoeff < 1.0f)
@@ -149,7 +174,8 @@ public:
 
 private:
     double currentSampleRate = 44100.0;
-    std::vector<int> activeNotes;
+    std::array<int, maxActiveNotes> activeNotes {};
+    int activeNoteCount = 0;
 
     float currentFrequency = 0.0f;
     float targetFrequency = 0.0f;

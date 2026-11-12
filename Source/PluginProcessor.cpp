@@ -2,6 +2,22 @@
 #include "PluginEditor.h"
 #include "Presets/PresetManager.h"
 
+#include <algorithm>
+#include <cmath>
+
+namespace
+{
+inline float loadFiniteParam(const std::atomic<float>* ptr, float fallback, float minVal, float maxVal) noexcept
+{
+    if (ptr == nullptr)
+        return fallback;
+    const float v = ptr->load(std::memory_order_relaxed);
+    if (!std::isfinite(v))
+        return fallback;
+    return juce::jlimit(minVal, maxVal, v);
+}
+} // namespace
+
 AllyBassAudioProcessor::AllyBassAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
      : AudioProcessor(BusesProperties()
@@ -17,7 +33,19 @@ AllyBassAudioProcessor::AllyBassAudioProcessor()
      : apvts(*this, nullptr, "Parameters", createParameterLayout())
 #endif
 {
+    rawDiepte         = apvts.getRawParameterValue("diepte");
+    rawPolderPunch    = apvts.getRawParameterValue("polderPunch");
+    rawHavenDirt      = apvts.getRawParameterValue("havenDirt");
+    rawWaterwijkGlide = apvts.getRawParameterValue("waterwijkGlide");
+    rawMasterVolume   = apvts.getRawParameterValue("masterVolume");
+    rawAttack         = apvts.getRawParameterValue("attack");
+    rawRelease        = apvts.getRawParameterValue("release");
+    rawStadsdeel      = apvts.getRawParameterValue("stadsdeel");
+    rawOverdrive036   = apvts.getRawParameterValue("overdrive036");
+    rawMonoLock1300   = apvts.getRawParameterValue("monoLock1300");
+
     resetOutputTelemetry();
+    keyboardState.addListener(this);
     apvts.state.addListener(this);
     for (const auto& id : AllyPresets::getAllParameterIds())
         apvts.addParameterListener(id, this);
@@ -25,6 +53,7 @@ AllyBassAudioProcessor::AllyBassAudioProcessor()
 
 AllyBassAudioProcessor::~AllyBassAudioProcessor()
 {
+    keyboardState.removeListener(this);
     for (const auto& id : AllyPresets::getAllParameterIds())
         apvts.removeParameterListener(id, this);
     apvts.state.removeListener(this);
@@ -156,32 +185,42 @@ void AllyBassAudioProcessor::changeProgramName(int, const juce::String&) {}
 
 void AllyBassAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    currentSampleRateHz.store(sampleRate > 1.0 ? sampleRate : 44100.0, std::memory_order_relaxed);
-    waterwijkGlide.prepare(sampleRate);
-    napSubOsc.prepare(sampleRate);
-    polderTransient.prepare(sampleRate);
-    stadsdeelSaturation.prepare(sampleRate);
+    const double validSr = (std::isfinite(sampleRate) && sampleRate > 1.0) ? sampleRate : 44100.0;
+    const int safeBlockSize = juce::jmax(1, samplesPerBlock);
+    currentSampleRateHz.store(validSr, std::memory_order_relaxed);
+
+    waterwijkGlide.prepare(validSr);
+    napSubOsc.prepare(validSr);
+    polderTransient.prepare(validSr);
+    stadsdeelSaturation.prepare(validSr);
 
     juce::dsp::ProcessSpec spec;
-    spec.sampleRate = sampleRate;
-    spec.maximumBlockSize = static_cast<juce::uint32>(samplesPerBlock);
-    spec.numChannels = static_cast<juce::uint32>(getTotalNumOutputChannels());
+    spec.sampleRate = validSr;
+    spec.maximumBlockSize = static_cast<juce::uint32>(safeBlockSize);
+    spec.numChannels = static_cast<juce::uint32>(juce::jmax(1, getTotalNumOutputChannels()));
 
     monoLockFilter.prepare(spec);
     overdrive036.prepare(spec);
 
     masterLowPass.prepare(spec);
-    *masterLowPass.state = *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, 14000.0f, 0.7071f);
+    const float safeLowPassHz = juce::jmin(14000.0f, 0.45f * static_cast<float>(validSr));
+    *masterLowPass.state = *juce::dsp::IIR::Coefficients<float>::makeLowPass(validSr, safeLowPassHz, 0.7071f);
 
-    const double validSr = sampleRate > 1.0 ? sampleRate : 44100.0;
     velocitySmoothCoeff = 1.0f - std::exp(-1.0f / juce::jmax(1.0f, 0.002f * static_cast<float>(validSr)));
 
     envState = EnvelopeState::Idle;
     envLevel = 0.0f;
     targetVelocity = 1.0f;
     currentVelocityGain = 1.0f;
-    updateEnvelopeRates(apvts.getRawParameterValue("attack")->load(),
-                        apvts.getRawParameterValue("release")->load());
+    updateEnvelopeRates(loadFiniteParam(rawAttack, 8.0f, 1.0f, 300.0f),
+                        loadFiniteParam(rawRelease, 250.0f, 10.0f, 3000.0f));
+
+    audioGuiHeldNotesMask = { 0u, 0u };
+    audioExternalNotesMask = { 0u, 0u };
+    externalMidiNotesMask[0].store(0u, std::memory_order_release);
+    externalMidiNotesMask[1].store(0u, std::memory_order_release);
+    externalMidiVersion.fetch_add(1, std::memory_order_release);
+
     resetOutputTelemetry();
 }
 
@@ -194,6 +233,13 @@ void AllyBassAudioProcessor::releaseResources()
     monoLockFilter.reset();
     overdrive036.reset();
     keyboardState.reset();
+    guiDesiredNotesMask[0].store(0u, std::memory_order_release);
+    guiDesiredNotesMask[1].store(0u, std::memory_order_release);
+    audioGuiHeldNotesMask = { 0u, 0u };
+    audioExternalNotesMask = { 0u, 0u };
+    externalMidiNotesMask[0].store(0u, std::memory_order_release);
+    externalMidiNotesMask[1].store(0u, std::memory_order_release);
+    externalMidiVersion.fetch_add(1, std::memory_order_release);
     resetOutputTelemetry();
 }
 
@@ -233,8 +279,9 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
 
     if (message.isNoteOn())
     {
-        const float glideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
-        const float vel = juce::jlimit(0.0f, 1.0f, message.getFloatVelocity());
+        const float glideMs = loadFiniteParam(rawWaterwijkGlide, 40.0f, 0.0f, 500.0f);
+        const float rawVel = message.getFloatVelocity();
+        const float vel = std::isfinite(rawVel) ? juce::jlimit(0.0f, 1.0f, rawVel) : 0.0f;
         waterwijkGlide.noteOn(message.getNoteNumber(), vel, glideMs);
 
         const bool isFreshNote = waterwijkGlide.popTransientTrigger();
@@ -257,7 +304,7 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
     }
     else if (message.isNoteOff())
     {
-        float glideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
+        const float glideMs = loadFiniteParam(rawWaterwijkGlide, 40.0f, 0.0f, 500.0f);
         waterwijkGlide.noteOff(message.getNoteNumber(), glideMs);
         if (!waterwijkGlide.getIsNoteActive())
         {
@@ -275,12 +322,130 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
     }
 }
 
+void AllyBassAudioProcessor::handleNoteOn(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity)
+{
+    if (suppressGuiMidiForwarding || midiNoteNumber < 0 || midiNoteNumber >= 128)
+        return;
+
+    const size_t word = static_cast<size_t>(midiNoteNumber >> 6);
+    const uint64_t bit = 1ULL << (midiNoteNumber & 63);
+    guiDesiredNotesMask[word].fetch_or(bit, std::memory_order_release);
+
+    const float clampedVel = std::isfinite(velocity) ? juce::jlimit(0.0f, 1.0f, velocity) : 0.9f;
+    pushGuiMidiEvent({
+        true,
+        static_cast<uint8_t>(juce::jlimit(1, 16, midiChannel)),
+        static_cast<uint8_t>(midiNoteNumber),
+        clampedVel
+    });
+}
+
+void AllyBassAudioProcessor::handleNoteOff(juce::MidiKeyboardState*, int midiChannel, int midiNoteNumber, float velocity)
+{
+    if (suppressGuiMidiForwarding || midiNoteNumber < 0 || midiNoteNumber >= 128)
+        return;
+
+    const size_t word = static_cast<size_t>(midiNoteNumber >> 6);
+    const uint64_t bit = 1ULL << (midiNoteNumber & 63);
+    guiDesiredNotesMask[word].fetch_and(~bit, std::memory_order_release);
+
+    const float clampedVel = std::isfinite(velocity) ? juce::jlimit(0.0f, 1.0f, velocity) : 0.0f;
+    pushGuiMidiEvent({
+        false,
+        static_cast<uint8_t>(juce::jlimit(1, 16, midiChannel)),
+        static_cast<uint8_t>(midiNoteNumber),
+        clampedVel
+    });
+}
+
+void AllyBassAudioProcessor::pushGuiMidiEvent(const GuiMidiEvent& ev) noexcept
+{
+    const uint32_t write = guiMidiWriteIdx.load(std::memory_order_relaxed);
+    const uint32_t read  = guiMidiReadIdx.load(std::memory_order_acquire);
+
+    if ((write - read) < static_cast<uint32_t>(guiMidiQueueCapacity))
+    {
+        guiToAudioMidiQueue[write & (guiMidiQueueCapacity - 1)] = ev;
+        guiMidiWriteIdx.store(write + 1u, std::memory_order_release);
+    }
+    else
+    {
+        // Bounded overflow safety: record overflow so audio reconciles authoritative 128-note mask (zero stuck notes)
+        guiQueueOverflowCount.fetch_add(1, std::memory_order_relaxed);
+        guiMidiOverflowPending.store(true, std::memory_order_release);
+    }
+}
+
+void AllyBassAudioProcessor::syncExternalMidiToKeyboardState(uint64_t& inOutLastVersion,
+                                                             std::array<uint64_t, 2>& inOutAppliedExternalMask)
+{
+    const uint64_t version = externalMidiVersion.load(std::memory_order_acquire);
+    if (version == inOutLastVersion)
+        return;
+
+    inOutLastVersion = version;
+    const std::array<uint64_t, 2> targetMask = {
+        externalMidiNotesMask[0].load(std::memory_order_acquire),
+        externalMidiNotesMask[1].load(std::memory_order_acquire)
+    };
+
+    suppressGuiMidiForwarding = true;
+    for (int w = 0; w < 2; ++w)
+    {
+        const uint64_t diff = inOutAppliedExternalMask[static_cast<size_t>(w)] ^ targetMask[static_cast<size_t>(w)];
+        if (diff == 0u)
+            continue;
+
+        for (int b = 0; b < 64; ++b)
+        {
+            const uint64_t bit = 1ULL << b;
+            if ((diff & bit) != 0u)
+            {
+                const int note = w * 64 + b;
+                if ((targetMask[static_cast<size_t>(w)] & bit) != 0u)
+                    keyboardState.noteOn(1, note, 0.9f);
+                else
+                    keyboardState.noteOff(1, note, 0.0f);
+            }
+        }
+
+        inOutAppliedExternalMask[static_cast<size_t>(w)] = targetMask[static_cast<size_t>(w)];
+    }
+    suppressGuiMidiForwarding = false;
+}
+
+void AllyBassAudioProcessor::publishScopeHistoryToTripleBuffer() noexcept
+{
+    auto& dst = scopeTripleSlots[scopeProducerSlot];
+    const int tailLen = visualizerBufferSize - scopeHistoryWritePos;
+    std::copy_n(scopeHistory.data() + scopeHistoryWritePos, static_cast<size_t>(tailLen), dst.data());
+    if (scopeHistoryWritePos > 0)
+        std::copy_n(scopeHistory.data(), static_cast<size_t>(scopeHistoryWritePos), dst.data() + tailLen);
+
+    const uint8_t prev = scopeTripleMiddle.exchange(
+        static_cast<uint8_t>(scopeProducerSlot | kTripleDirtyBit), std::memory_order_acq_rel);
+    scopeProducerSlot = static_cast<uint8_t>(prev & kTripleSlotMask);
+}
+
 void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
 
-    // Process on-screen and computer keyboard events into MIDI stream
-    keyboardState.processNextMidiBuffer(midiMessages, 0, buffer.getNumSamples(), true);
+    // Drain bounded lock-free GUI MIDI queue without touching keyboardState mutex or allocating heap memory
+    std::array<GuiMidiEvent, guiMidiQueueCapacity> localGuiEvents {};
+    int numGuiEvents = 0;
+    {
+        uint32_t read = guiMidiReadIdx.load(std::memory_order_relaxed);
+        const uint32_t write = guiMidiWriteIdx.load(std::memory_order_acquire);
+        while (read != write && numGuiEvents < guiMidiQueueCapacity)
+        {
+            localGuiEvents[static_cast<size_t>(numGuiEvents++)] = guiToAudioMidiQueue[read & (guiMidiQueueCapacity - 1)];
+            ++read;
+        }
+        if (numGuiEvents > 0)
+            guiMidiReadIdx.store(read, std::memory_order_release);
+    }
+    const bool hadGuiOverflow = guiMidiOverflowPending.exchange(false, std::memory_order_acq_rel);
 
     const int totalNumInputChannels  = getTotalNumInputChannels();
     const int totalNumOutputChannels = getTotalNumOutputChannels();
@@ -290,24 +455,134 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
     const int numSamples = buffer.getNumSamples();
     if (numSamples <= 0 || totalNumOutputChannels <= 0 || buffer.getNumChannels() <= 0)
+    {
+        // Even on 0-sample host ping, drain GUI events so noteOff/overflow never leaves hung state
+        const float idleAttack = loadFiniteParam(rawAttack, 8.0f, 1.0f, 300.0f);
+        const float idlePunch = loadFiniteParam(rawPolderPunch, 0.0f, 0.0f, 1.0f);
+        for (int i = 0; i < numGuiEvents; ++i)
+        {
+            const auto& ev = localGuiEvents[static_cast<size_t>(i)];
+            const size_t w = static_cast<size_t>(ev.note >> 6);
+            const uint64_t bit = 1ULL << (ev.note & 63);
+            if (ev.isNoteOn)
+            {
+                audioGuiHeldNotesMask[w] |= bit;
+                handleMidiEvent(juce::MidiMessage::noteOn(ev.channel, ev.note, ev.velocity), idleAttack, idlePunch);
+            }
+            else
+            {
+                audioGuiHeldNotesMask[w] &= ~bit;
+                handleMidiEvent(juce::MidiMessage::noteOff(ev.channel, ev.note), idleAttack, idlePunch);
+            }
+        }
         return;
+    }
 
-    // Fetch parameter values
-    const float diepte = apvts.getRawParameterValue("diepte")->load();
-    const float polderPunch = apvts.getRawParameterValue("polderPunch")->load();
-    const float havenDirt = apvts.getRawParameterValue("havenDirt")->load();
-    const float waterwijkGlideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
-    const float masterVolDb = apvts.getRawParameterValue("masterVolume")->load();
-    const float masterGain = juce::Decibels::decibelsToGain(masterVolDb);
+    // Fetch cached parameter pointers directly with finite-float clamping (zero map lookup, zero NaN propagation)
+    const float diepte           = loadFiniteParam(rawDiepte, 0.50f, 0.0f, 1.0f);
+    const float polderPunch      = loadFiniteParam(rawPolderPunch, 0.0f, 0.0f, 1.0f);
+    const float havenDirt        = loadFiniteParam(rawHavenDirt, 0.15f, 0.0f, 1.0f);
+    const float waterwijkGlideMs = loadFiniteParam(rawWaterwijkGlide, 40.0f, 0.0f, 500.0f);
+    const float masterVolDb      = loadFiniteParam(rawMasterVolume, 0.0f, -24.0f, 6.0f);
+    const float masterGain       = juce::Decibels::decibelsToGain(masterVolDb);
 
-    const float attackMs = apvts.getRawParameterValue("attack")->load();
-    const float releaseMs = apvts.getRawParameterValue("release")->load();
-    const int stadsdeelIndex = static_cast<int>(apvts.getRawParameterValue("stadsdeel")->load());
-    const bool isOverdrive = apvts.getRawParameterValue("overdrive036")->load() > 0.5f;
-    const bool isMonoLock = apvts.getRawParameterValue("monoLock1300")->load() > 0.5f;
+    const float attackMs       = loadFiniteParam(rawAttack, 8.0f, 1.0f, 300.0f);
+    const float releaseMs      = loadFiniteParam(rawRelease, 250.0f, 10.0f, 3000.0f);
+    const int stadsdeelIndex   = juce::jlimit(0, 3, juce::roundToInt(loadFiniteParam(rawStadsdeel, 1.0f, 0.0f, 3.0f)));
+    const bool isOverdrive     = loadFiniteParam(rawOverdrive036, 0.0f, 0.0f, 1.0f) > 0.5f;
+    const bool isMonoLock      = loadFiniteParam(rawMonoLock1300, 1.0f, 0.0f, 1.0f) > 0.5f;
 
     updateEnvelopeRates(attackMs, releaseMs);
     waterwijkGlide.updateGlideCoeff(waterwijkGlideMs, waterwijkGlide.getCurrentVelocity());
+
+    auto processGuiNoteEventsAtSampleZero = [&]()
+    {
+        for (int i = 0; i < numGuiEvents; ++i)
+        {
+            const auto& ev = localGuiEvents[static_cast<size_t>(i)];
+            const size_t w = static_cast<size_t>(ev.note >> 6);
+            const uint64_t bit = 1ULL << (ev.note & 63);
+            if (ev.isNoteOn)
+            {
+                audioGuiHeldNotesMask[w] |= bit;
+                handleMidiEvent(juce::MidiMessage::noteOn(ev.channel, ev.note, ev.velocity), attackMs, polderPunch);
+            }
+            else
+            {
+                audioGuiHeldNotesMask[w] &= ~bit;
+                handleMidiEvent(juce::MidiMessage::noteOff(ev.channel, ev.note), attackMs, polderPunch);
+            }
+        }
+
+        if (hadGuiOverflow)
+        {
+            // Reconcile against authoritative 128-note atomic mask so queue overflow never leaves stuck notes
+            const std::array<uint64_t, 2> desired = {
+                guiDesiredNotesMask[0].load(std::memory_order_acquire),
+                guiDesiredNotesMask[1].load(std::memory_order_acquire)
+            };
+
+            for (int w = 0; w < 2; ++w)
+            {
+                const uint64_t staleOn = audioGuiHeldNotesMask[static_cast<size_t>(w)]
+                                       & ~desired[static_cast<size_t>(w)];
+                if (staleOn != 0u)
+                {
+                    for (int b = 0; b < 64; ++b)
+                    {
+                        const uint64_t bit = 1ULL << b;
+                        if ((staleOn & bit) != 0u)
+                        {
+                            const int note = w * 64 + b;
+                            audioGuiHeldNotesMask[static_cast<size_t>(w)] &= ~bit;
+                            handleMidiEvent(juce::MidiMessage::noteOff(1, note), attackMs, polderPunch);
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    bool externalMidiMaskChanged = false;
+    auto trackExternalMidi = [&](const juce::MidiMessage& msg) noexcept
+    {
+        if (msg.isNoteOn())
+        {
+            const int n = msg.getNoteNumber();
+            if (n >= 0 && n < 128)
+            {
+                const size_t w = static_cast<size_t>(n >> 6);
+                const uint64_t bit = 1ULL << (n & 63);
+                if ((audioExternalNotesMask[w] & bit) == 0u)
+                {
+                    audioExternalNotesMask[w] |= bit;
+                    externalMidiMaskChanged = true;
+                }
+            }
+        }
+        else if (msg.isNoteOff())
+        {
+            const int n = msg.getNoteNumber();
+            if (n >= 0 && n < 128)
+            {
+                const size_t w = static_cast<size_t>(n >> 6);
+                const uint64_t bit = 1ULL << (n & 63);
+                if ((audioExternalNotesMask[w] & bit) != 0u)
+                {
+                    audioExternalNotesMask[w] &= ~bit;
+                    externalMidiMaskChanged = true;
+                }
+            }
+        }
+        else if (msg.isAllNotesOff() || msg.isAllSoundOff())
+        {
+            if (audioExternalNotesMask[0] != 0u || audioExternalNotesMask[1] != 0u)
+            {
+                audioExternalNotesMask = { 0u, 0u };
+                externalMidiMaskChanged = true;
+            }
+        }
+    };
 
     auto* leftOut = buffer.getWritePointer(0);
     auto* rightOut = totalNumOutputChannels > 1 ? buffer.getWritePointer(1) : nullptr;
@@ -316,12 +591,16 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     const auto midiEnd = midiMessages.cend();
     float sumSubRms = 0.0f;
 
+    processGuiNoteEventsAtSampleZero();
+
     for (int sample = 0; sample < numSamples; ++sample)
     {
         // Process all MIDI events at (or before) this exact sample position sequentially
         while (midiIterator != midiEnd && (*midiIterator).samplePosition <= sample)
         {
-            handleMidiEvent((*midiIterator).getMessage(), attackMs, polderPunch);
+            const auto msg = (*midiIterator).getMessage();
+            trackExternalMidi(msg);
+            handleMidiEvent(msg, attackMs, polderPunch);
             ++midiIterator;
         }
 
@@ -387,6 +666,9 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
             // 3. Stadsdeel Saturation
             synthSample = stadsdeelSaturation.processSample(
                 synthSample, havenDirt, static_cast<AllyDSP::StadsdeelMode>(stadsdeelIndex));
+
+            if (!std::isfinite(synthSample))
+                synthSample = 0.0f;
         }
         else
         {
@@ -403,13 +685,22 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     // Drain any MIDI events stamped past the block end so noteOffs are never lost
     while (midiIterator != midiEnd)
     {
-        handleMidiEvent((*midiIterator).getMessage(), attackMs, polderPunch);
+        const auto msg = (*midiIterator).getMessage();
+        trackExternalMidi(msg);
+        handleMidiEvent(msg, attackMs, polderPunch);
         ++midiIterator;
+    }
+
+    if (externalMidiMaskChanged)
+    {
+        externalMidiNotesMask[0].store(audioExternalNotesMask[0], std::memory_order_release);
+        externalMidiNotesMask[1].store(audioExternalNotesMask[1], std::memory_order_release);
+        externalMidiVersion.fetch_add(1, std::memory_order_release);
     }
 
     // Update real-time pre-postfilter sub RMS telemetry
     float rms = std::sqrt(sumSubRms / static_cast<float>(numSamples));
-    currentSubLevel.store(rms, std::memory_order_relaxed);
+    currentSubLevel.store(std::isfinite(rms) ? rms : 0.0f, std::memory_order_relaxed);
 
     // 4. Master Filter
     juce::dsp::AudioBlock<float> block(buffer);
@@ -428,28 +719,37 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         buffer.applyGain(masterGain);
     }
 
-    // 8. Lock-free, allocation-free post-output telemetry capture (Scope FIFO + Peak/RMS/Clip meter)
+    // 8. Wait-free triple-buffered post-output telemetry (Scope snapshot + coherent Meter metrics)
     {
         const int activeChannels = juce::jmin(buffer.getNumChannels(), juce::jlimit(1, 2, totalNumOutputChannels));
-        const float* ch0 = buffer.getReadPointer(0);
-        const float* ch1 = (activeChannels > 1) ? buffer.getReadPointer(1) : nullptr;
+        float* ch0W = buffer.getWritePointer(0);
+        float* ch1W = (activeChannels > 1) ? buffer.getWritePointer(1) : nullptr;
 
-        int writeIdx = visualizerWriteIndex.load(std::memory_order_relaxed);
+        const int scopeStart = (numSamples > visualizerBufferSize) ? (numSamples - visualizerBufferSize) : 0;
         double sumSquares = 0.0;
         float blockPeakL = 0.0f;
         float blockPeakR = 0.0f;
 
         for (int s = 0; s < numSamples; ++s)
         {
-            const float rawL = (ch0 != nullptr) ? ch0[s] : 0.0f;
-            const float l = std::isfinite(rawL) ? rawL : 0.0f;
-            const float rawR = (ch1 != nullptr) ? ch1[s] : rawL;
-            const float r = std::isfinite(rawR) ? rawR : 0.0f;
+            float l = (ch0W != nullptr) ? ch0W[s] : 0.0f;
+            if (!std::isfinite(l))
+            {
+                l = 0.0f;
+                if (ch0W != nullptr) ch0W[s] = 0.0f;
+            }
+
+            float r = (ch1W != nullptr) ? ch1W[s] : l;
+            if (!std::isfinite(r))
+            {
+                r = 0.0f;
+                if (ch1W != nullptr) ch1W[s] = 0.0f;
+            }
 
             blockPeakL = juce::jmax(blockPeakL, std::abs(l));
             sumSquares += static_cast<double>(l) * static_cast<double>(l);
 
-            if (ch1 != nullptr)
+            if (ch1W != nullptr)
             {
                 blockPeakR = juce::jmax(blockPeakR, std::abs(r));
                 sumSquares += static_cast<double>(r) * static_cast<double>(r);
@@ -459,29 +759,38 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
                 blockPeakR = blockPeakL;
             }
 
-            const float scopeSample = (ch1 != nullptr) ? (0.5f * (l + r)) : l;
-            visualizerBuffer[static_cast<size_t>(writeIdx)].store(scopeSample, std::memory_order_relaxed);
-            writeIdx = (writeIdx + 1) & (visualizerBufferSize - 1);
+            if (s >= scopeStart)
+            {
+                scopeHistory[static_cast<size_t>(scopeHistoryWritePos)] = (ch1W != nullptr) ? (0.5f * (l + r)) : l;
+                scopeHistoryWritePos = (scopeHistoryWritePos + 1) & (visualizerBufferSize - 1);
+            }
         }
 
-        visualizerWriteIndex.store(writeIdx, std::memory_order_release);
+        publishScopeHistoryToTripleBuffer();
         visualizerWriteCounter.fetch_add(1, std::memory_order_release);
 
         const float blockPeak = juce::jmax(blockPeakL, blockPeakR);
         const float blockRms = static_cast<float>(
             std::sqrt(sumSquares / static_cast<double>(numSamples * juce::jmax(1, activeChannels))));
 
-        outputLastBlockPeak.store(blockPeak, std::memory_order_relaxed);
-        outputLastBlockRms.store(blockRms, std::memory_order_relaxed);
-        outputLeftPeak.store(blockPeakL, std::memory_order_relaxed);
-        outputRightPeak.store(blockPeakR, std::memory_order_relaxed);
-        outputChannelCount.store(activeChannels, std::memory_order_relaxed);
+        ++audioMeterSeq;
+        auto& mSlot = meterTripleSlots[meterProducerSlot];
+        mSlot.peakLinear      = blockPeak;
+        mSlot.rmsLinear       = blockRms;
+        mSlot.leftPeakLinear  = blockPeakL;
+        mSlot.rightPeakLinear = blockPeakR;
+        mSlot.channelCount    = activeChannels;
+        mSlot.updateCounter   = audioMeterSeq;
+
+        const uint8_t prevMeter = meterTripleMiddle.exchange(
+            static_cast<uint8_t>(meterProducerSlot | kTripleDirtyBit), std::memory_order_acq_rel);
+        meterProducerSlot = static_cast<uint8_t>(prevMeter & kTripleSlotMask);
 
         // Lock-free atomic fetch-max so brief transients between GUI refreshes are captured reliably
         float expectedPeak = outputPeakLatched.load(std::memory_order_relaxed);
         while (blockPeak > expectedPeak
                && !outputPeakLatched.compare_exchange_weak(expectedPeak, blockPeak,
-                                                           std::memory_order_relaxed,
+                                                           std::memory_order_release,
                                                            std::memory_order_relaxed))
         {
         }
@@ -489,15 +798,15 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         float expectedRms = outputRmsLatched.load(std::memory_order_relaxed);
         while (blockRms > expectedRms
                && !outputRmsLatched.compare_exchange_weak(expectedRms, blockRms,
-                                                          std::memory_order_relaxed,
+                                                          std::memory_order_release,
                                                           std::memory_order_relaxed))
         {
         }
 
         if (blockPeak >= 1.0f)
-            outputClipLatched.store(true, std::memory_order_relaxed);
+            outputClipLatched.store(true, std::memory_order_release);
 
-        outputMeterCounter.fetch_add(1, std::memory_order_release);
+        outputMeterCounter.store(audioMeterSeq, std::memory_order_release);
     }
 }
 
@@ -510,14 +819,19 @@ void AllyBassAudioProcessor::getVisualizerData(float* destination, int numSample
     for (int i = 0; i < numSamples - count; ++i)
         destination[i] = 0.0f;
 
-    const int currentWrite = visualizerWriteIndex.load(std::memory_order_acquire);
-    const int readStart = (currentWrite - count + visualizerBufferSize) & (visualizerBufferSize - 1);
+    const uint8_t mid = scopeTripleMiddle.load(std::memory_order_relaxed);
+    if ((mid & kTripleDirtyBit) != 0u)
+    {
+        const uint8_t prev = scopeTripleMiddle.exchange(scopeConsumerSlot, std::memory_order_acq_rel);
+        scopeConsumerSlot = static_cast<uint8_t>(prev & kTripleSlotMask);
+    }
 
+    const auto& src = scopeTripleSlots[scopeConsumerSlot];
+    const int srcStart = visualizerBufferSize - count;
     float* dst = destination + (numSamples - count);
     for (int i = 0; i < count; ++i)
     {
-        const int index = (readStart + i) & (visualizerBufferSize - 1);
-        const float val = visualizerBuffer[static_cast<size_t>(index)].load(std::memory_order_relaxed);
+        const float val = src[static_cast<size_t>(srcStart + i)];
         dst[i] = std::isfinite(val) ? val : 0.0f;
     }
 }
@@ -529,12 +843,12 @@ uint64_t AllyBassAudioProcessor::getVisualizerWriteCounter() const noexcept
 
 bool AllyBassAudioProcessor::isOverdriveActive() const noexcept
 {
-    return apvts.getRawParameterValue("overdrive036")->load() > 0.5f;
+    return loadFiniteParam(rawOverdrive036, 0.0f, 0.0f, 1.0f) > 0.5f;
 }
 
 bool AllyBassAudioProcessor::isMonoLockActive() const noexcept
 {
-    return apvts.getRawParameterValue("monoLock1300")->load() > 0.5f;
+    return loadFiniteParam(rawMonoLock1300, 1.0f, 0.0f, 1.0f) > 0.5f;
 }
 
 float AllyBassAudioProcessor::getCurrentSubLevel() const noexcept
@@ -547,59 +861,75 @@ double AllyBassAudioProcessor::getCurrentSampleRate() const noexcept
     return currentSampleRateHz.load(std::memory_order_relaxed);
 }
 
+AllyBassAudioProcessor::OutputMeterMetrics AllyBassAudioProcessor::pullLatestMeterBlock() const noexcept
+{
+    const uint8_t mid = meterTripleMiddle.load(std::memory_order_relaxed);
+    if ((mid & kTripleDirtyBit) != 0u)
+    {
+        const uint8_t prev = meterTripleMiddle.exchange(meterConsumerSlot, std::memory_order_acq_rel);
+        meterConsumerSlot = static_cast<uint8_t>(prev & kTripleSlotMask);
+    }
+
+    const auto& snap = meterTripleSlots[meterConsumerSlot];
+    OutputMeterMetrics m;
+    m.peakLinear      = snap.peakLinear;
+    m.rmsLinear       = snap.rmsLinear;
+    m.leftPeakLinear  = snap.leftPeakLinear;
+    m.rightPeakLinear = snap.rightPeakLinear;
+    m.channelCount    = snap.channelCount;
+    m.updateCounter   = snap.updateCounter;
+    return m;
+}
+
 AllyBassAudioProcessor::OutputMeterMetrics AllyBassAudioProcessor::peekOutputMeterMetrics() const noexcept
 {
-    OutputMeterMetrics m;
-    const float lastPeak = outputLastBlockPeak.load(std::memory_order_relaxed);
-    const float latchedP = outputPeakLatched.load(std::memory_order_relaxed);
-    const float lastRms  = outputLastBlockRms.load(std::memory_order_relaxed);
-    const float latchedR = outputRmsLatched.load(std::memory_order_relaxed);
+    OutputMeterMetrics m = pullLatestMeterBlock();
+    const float latchedP = outputPeakLatched.load(std::memory_order_acquire);
+    const float latchedR = outputRmsLatched.load(std::memory_order_acquire);
+    const bool  latchedC = outputClipLatched.load(std::memory_order_acquire);
 
-    m.peakLinear      = juce::jmax(lastPeak, latchedP);
-    m.rmsLinear       = juce::jmax(lastRms, latchedR);
-    m.leftPeakLinear  = outputLeftPeak.load(std::memory_order_relaxed);
-    m.rightPeakLinear = outputRightPeak.load(std::memory_order_relaxed);
-    m.channelCount    = outputChannelCount.load(std::memory_order_relaxed);
-    m.clipped         = outputClipLatched.load(std::memory_order_relaxed) || (m.peakLinear >= 1.0f);
-    m.updateCounter   = outputMeterCounter.load(std::memory_order_acquire);
+    m.peakLinear    = juce::jmax(m.peakLinear, latchedP);
+    m.rmsLinear     = juce::jmax(m.rmsLinear, latchedR);
+    m.clipped       = latchedC || (m.peakLinear >= 1.0f);
+    m.updateCounter = outputMeterCounter.load(std::memory_order_acquire);
     return m;
 }
 
 AllyBassAudioProcessor::OutputMeterMetrics AllyBassAudioProcessor::consumeOutputMeterMetrics() noexcept
 {
-    OutputMeterMetrics m;
-    const float lastPeak = outputLastBlockPeak.load(std::memory_order_relaxed);
-    const float latchedP = outputPeakLatched.exchange(0.0f, std::memory_order_relaxed);
-    const float lastRms  = outputLastBlockRms.load(std::memory_order_relaxed);
-    const float latchedR = outputRmsLatched.exchange(0.0f, std::memory_order_relaxed);
+    OutputMeterMetrics m = pullLatestMeterBlock();
+    const float latchedP = outputPeakLatched.exchange(0.0f, std::memory_order_acq_rel);
+    const float latchedR = outputRmsLatched.exchange(0.0f, std::memory_order_acq_rel);
+    const bool  latchedC = outputClipLatched.exchange(false, std::memory_order_acq_rel);
 
-    m.peakLinear      = juce::jmax(lastPeak, latchedP);
-    m.rmsLinear       = juce::jmax(lastRms, latchedR);
-    m.leftPeakLinear  = outputLeftPeak.load(std::memory_order_relaxed);
-    m.rightPeakLinear = outputRightPeak.load(std::memory_order_relaxed);
-    m.channelCount    = outputChannelCount.load(std::memory_order_relaxed);
-    m.clipped         = outputClipLatched.exchange(false, std::memory_order_relaxed) || (m.peakLinear >= 1.0f);
-    m.updateCounter   = outputMeterCounter.load(std::memory_order_acquire);
+    m.peakLinear    = juce::jmax(m.peakLinear, latchedP);
+    m.rmsLinear     = juce::jmax(m.rmsLinear, latchedR);
+    m.clipped       = latchedC || (m.peakLinear >= 1.0f);
+    m.updateCounter = outputMeterCounter.load(std::memory_order_acquire);
     return m;
 }
 
 void AllyBassAudioProcessor::resetOutputTelemetry() noexcept
 {
-    for (auto& slot : visualizerBuffer)
-        slot.store(0.0f, std::memory_order_relaxed);
+    scopeHistory.fill(0.0f);
+    scopeHistoryWritePos = 0;
+    scopeTripleSlots[scopeProducerSlot].fill(0.0f);
+    const uint8_t prevScope = scopeTripleMiddle.exchange(
+        static_cast<uint8_t>(scopeProducerSlot | kTripleDirtyBit), std::memory_order_acq_rel);
+    scopeProducerSlot = static_cast<uint8_t>(prevScope & kTripleSlotMask);
 
-    visualizerWriteIndex.store(0, std::memory_order_release);
     visualizerWriteCounter.store(0, std::memory_order_release);
     currentSubLevel.store(0.0f, std::memory_order_relaxed);
 
-    outputLastBlockPeak.store(0.0f, std::memory_order_relaxed);
-    outputLastBlockRms.store(0.0f, std::memory_order_relaxed);
-    outputPeakLatched.store(0.0f, std::memory_order_relaxed);
-    outputRmsLatched.store(0.0f, std::memory_order_relaxed);
-    outputLeftPeak.store(0.0f, std::memory_order_relaxed);
-    outputRightPeak.store(0.0f, std::memory_order_relaxed);
-    outputChannelCount.store(2, std::memory_order_relaxed);
-    outputClipLatched.store(false, std::memory_order_relaxed);
+    audioMeterSeq = 0;
+    meterTripleSlots[meterProducerSlot] = OutputMeterBlockSnapshot {};
+    const uint8_t prevMeter = meterTripleMiddle.exchange(
+        static_cast<uint8_t>(meterProducerSlot | kTripleDirtyBit), std::memory_order_acq_rel);
+    meterProducerSlot = static_cast<uint8_t>(prevMeter & kTripleSlotMask);
+
+    outputPeakLatched.store(0.0f, std::memory_order_release);
+    outputRmsLatched.store(0.0f, std::memory_order_release);
+    outputClipLatched.store(false, std::memory_order_release);
     outputMeterCounter.store(0, std::memory_order_release);
 }
 
