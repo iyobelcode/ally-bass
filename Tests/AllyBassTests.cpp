@@ -23,8 +23,10 @@
 #include "GUI/OutputLevelMeter.h"
 #include "GUI/KeyboardPanel.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <ctime>
 #include <thread>
 #include <vector>
 
@@ -4837,6 +4839,411 @@ int main(int argc, char* argv[])
 
             writePng(dir.getChildFile("D2_07_ALLY1300_Active_State_780x580_2x.png"),
                      renderComponentImage(*ed, 2.0f));
+        }
+
+        return 0;
+    }
+
+    const auto d1e2ShotDir = juce::SystemStats::getEnvironmentVariable("ALLY_D1E2_SCREENSHOT_DIR", {});
+    if (d1e2ShotDir.isNotEmpty())
+    {
+        juce::File dir(d1e2ShotDir);
+        dir.createDirectory();
+
+        auto writePng = [](const juce::File& target, const juce::Image& image)
+        {
+            juce::PNGImageFormat png;
+            target.deleteFile();
+            if (auto out = target.createOutputStream())
+                png.writeImageToStream(image, *out);
+        };
+
+        auto renderImg = [](juce::Component& c, float scale)
+        {
+            const int rw = juce::roundToInt(static_cast<float>(c.getWidth()) * scale);
+            const int rh = juce::roundToInt(static_cast<float>(c.getHeight()) * scale);
+            juce::Image img(juce::Image::ARGB, rw, rh, true);
+            {
+                juce::Graphics g(img);
+                g.addTransform(juce::AffineTransform::scale(scale));
+                c.paintEntireComponent(g, true);
+            }
+            return img;
+        };
+
+        auto feedActiveSignal = [](AllyBassAudioProcessor& proc, AllyBassAudioProcessorEditor& ed, int midiNote, int blocks)
+        {
+            juce::AudioBuffer<float> audio(2, 256);
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, midiNote, 0.92f), 0);
+            for (int b = 0; b < blocks; ++b)
+            {
+                audio.clear();
+                proc.processBlock(audio, midi);
+                midi.clear();
+            }
+
+            if (auto* scope = findChildOfType<AllyGUI::NapWaveVisualizer>(ed))
+            {
+                std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> liveBuf {};
+                proc.getVisualizerData(liveBuf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+                scope->updateScopeWithSamples(liveBuf.data(),
+                                              AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                              proc.isOverdriveActive(),
+                                              proc.isMonoLockActive(),
+                                              proc.getCurrentSampleRate());
+            }
+            if (auto* primary = ed.getPrimaryKnobsPanel())
+            {
+                if (auto* meter = primary->getOutputMeter())
+                {
+                    const auto metrics = proc.peekOutputMeterMetrics();
+                    for (int i = 0; i < 6; ++i)
+                        meter->advanceWithSampledLevels(metrics.peakLinear, metrics.rmsLinear, metrics.clipped, 0.022f);
+                }
+            }
+        };
+
+        // A. Standard active state (Preset 0, 780x580 & 1200x850, plus component closeups)
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+            AllyPresets::applyPreset(proc.apvts, 0);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.35f);
+            setParamPlainValue(proc.apvts, "masterVolume", 0.0f);
+
+            std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+            ed->setSize(780, 580);
+            feedActiveSignal(proc, *ed, 36, 40);
+
+            proc.getKeyboardState().noteOn(1, 36, 0.94f);
+            proc.getKeyboardState().noteOn(1, 39, 0.90f);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+
+            writePng(dir.getChildFile("01_full_ui_780x580_1x.png"), renderImg(*ed, 1.0f));
+            writePng(dir.getChildFile("02_full_ui_780x580_2x.png"), renderImg(*ed, 2.0f));
+
+            if (auto* primary = ed->getPrimaryKnobsPanel())
+            {
+                writePng(dir.getChildFile("05_knobs_all_5_2x.png"), renderImg(*primary, 2.0f));
+                if (auto* meter = primary->getOutputMeter())
+                    writePng(dir.getChildFile("09_output_meter_2x.png"), renderImg(*meter, 2.0f));
+            }
+            if (auto* header = ed->getHeaderPanel())
+                writePng(dir.getChildFile("07_header_almere_2x.png"), renderImg(*header, 2.0f));
+            if (auto* scope = findChildOfType<AllyGUI::NapWaveVisualizer>(*ed))
+                writePng(dir.getChildFile("08_scope_active_2x.png"), renderImg(*scope, 2.0f));
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                writePng(dir.getChildFile("10_keyboard_active_2x.png"), renderImg(*kbPanel, 2.0f));
+
+            ed->setSize(1200, 850);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+            writePng(dir.getChildFile("03_full_ui_1200x850_1x.png"), renderImg(*ed, 1.0f));
+            writePng(dir.getChildFile("04_full_ui_1200x850_2x.png"), renderImg(*ed, 2.0f));
+        }
+
+        // B. Haven Dirt active state (780x580 @ 2x)
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+            AllyPresets::applyPreset(proc.apvts, 3);
+            setParamPlainValue(proc.apvts, "stadsdeel", 2.0f);
+            setParamPlainValue(proc.apvts, "diepte", 0.78f);
+            setParamPlainValue(proc.apvts, "havenDirt", 0.72f);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.68f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 85.0f);
+            setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+            setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+            setParamPlainValue(proc.apvts, "masterVolume", -0.5f);
+
+            std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+            ed->setSize(780, 580);
+            ed->setCurrentOctaveSafe(1);
+            feedActiveSignal(proc, *ed, 38, 38);
+
+            proc.getKeyboardState().allNotesOff(1);
+            proc.getKeyboardState().noteOn(1, 24, 0.95f);
+            proc.getKeyboardState().noteOn(1, 27, 0.90f);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+
+            writePng(dir.getChildFile("06_haven_dirt_active_780x580_2x.png"), renderImg(*ed, 2.0f));
+        }
+
+        return 0;
+    }
+
+    if (runMode == "perf")
+    {
+        auto threadCpuMs = []() -> double
+        {
+           #if JUCE_MAC || JUCE_LINUX
+            struct timespec ts {};
+            if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0)
+                return static_cast<double>(ts.tv_sec) * 1000.0 + static_cast<double>(ts.tv_nsec) * 1.0e-6;
+           #endif
+            return -1.0;
+        };
+
+        auto measureScenario = [&](const juce::String& name,
+                                   int warmupFrames,
+                                   int measuredFrames,
+                                   auto&& frameFn)
+        {
+            std::vector<double> times;
+            times.reserve(static_cast<size_t>(measuredFrames));
+
+            for (int i = 0; i < warmupFrames; ++i)
+                frameFn(i);
+
+            const double cpuStart = threadCpuMs();
+            for (int i = 0; i < measuredFrames; ++i)
+            {
+                const double t0 = juce::Time::getMillisecondCounterHiRes();
+                frameFn(warmupFrames + i);
+                const double t1 = juce::Time::getMillisecondCounterHiRes();
+                times.push_back(t1 - t0);
+            }
+            const double cpuEnd = threadCpuMs();
+
+            std::sort(times.begin(), times.end());
+            const double median = times[times.size() / 2];
+            const size_t p95Idx = static_cast<size_t>(std::min(times.size() - 1,
+                static_cast<size_t>(std::ceil(static_cast<double>(times.size()) * 0.95)) - 1));
+            const double p95 = times[p95Idx];
+            double sum = 0.0;
+            for (double v : times)
+                sum += v;
+            const double mean = sum / static_cast<double>(times.size());
+            const double cpuPerFrame = (cpuStart >= 0.0 && cpuEnd >= cpuStart)
+                ? (cpuEnd - cpuStart) / static_cast<double>(measuredFrames)
+                : -1.0;
+
+            std::cout << "[PERF] " << name
+                      << " | median=" << juce::String(median, 3) << " ms"
+                      << " | p95=" << juce::String(p95, 3) << " ms"
+                      << " | mean=" << juce::String(mean, 3) << " ms"
+                      << " | cpu/frame=" << juce::String(cpuPerFrame, 3) << " ms"
+                      << std::endl;
+            return median;
+        };
+
+        auto renderIntoImage = [](juce::Component& comp, juce::Image& backing, float scale)
+        {
+            juce::Graphics g(backing);
+            g.addTransform(juce::AffineTransform::scale(scale));
+            comp.paintEntireComponent(g, true);
+        };
+
+        std::cout << "=== ALLY1300 D.1E.2 PERFORMANCE SUITE (--mode perf) ===" << std::endl;
+
+        AllyBassAudioProcessor proc;
+        proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+        proc.prepareToPlay(48000.0, 256);
+        AllyPresets::applyPreset(proc.apvts, 3);
+        setParamPlainValue(proc.apvts, "havenDirt", 0.65f);
+        setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+
+        juce::AudioBuffer<float> audioBuf(2, 256);
+        juce::MidiBuffer midiBuf;
+        midiBuf.addEvent(juce::MidiMessage::noteOn(1, 36, 0.92f), 0);
+        for (int b = 0; b < 40; ++b)
+        {
+            audioBuf.clear();
+            proc.processBlock(audioBuf, midiBuf);
+            midiBuf.clear();
+        }
+
+        std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+        auto* header    = ed->getHeaderPanel();
+        auto& scope     = ed->getVisualizer();
+        auto* primary   = ed->getPrimaryKnobsPanel();
+        auto* meter     = (primary != nullptr) ? primary->getOutputMeter() : nullptr;
+        auto* secondary = ed->getSecondaryDspPanel();
+        auto* kbPanel   = ed->getKeyboardPanel();
+
+        std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> liveScopeBuf {};
+        auto pump45HzFrame = [&](int tickIdx)
+        {
+            audioBuf.clear();
+            proc.processBlock(audioBuf, midiBuf);
+            if ((tickIdx & 1) == 0)
+            {
+                proc.getVisualizerData(liveScopeBuf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+                scope.updateScopeWithSamples(liveScopeBuf.data(),
+                                             AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                             proc.isOverdriveActive(),
+                                             proc.isMonoLockActive(),
+                                             proc.getCurrentSampleRate());
+                if (meter != nullptr)
+                {
+                    const auto m = proc.consumeOutputMeterMetrics();
+                    meter->advanceWithSampledLevels(m.peakLinear, m.rmsLinear, m.clipped, 0.022f);
+                }
+            }
+            if (kbPanel != nullptr)
+                kbPanel->getKeyboard().timerCallback();
+        };
+        pump45HzFrame(0);
+
+        for (int run = 1; run <= 2; ++run)
+        {
+            std::cout << "--- Run #" << run << " ---" << std::endl;
+
+            struct SizeScale { int w; int h; float s; const char* tag; };
+            const SizeScale matrix[] = {
+                {  780,  580, 1.0f, "780x580 @ 1x" },
+                {  780,  580, 2.0f, "780x580 @ 2x" },
+                { 1200,  850, 1.0f, "1200x850 @ 1x" },
+                { 1200,  850, 2.0f, "1200x850 @ 2x" }
+            };
+
+            for (const auto& cfg : matrix)
+            {
+                ed->setSize(cfg.w, cfg.h);
+                pump45HzFrame(0);
+                juce::Image backing(juce::Image::ARGB,
+                                    juce::roundToInt(static_cast<float>(cfg.w) * cfg.s),
+                                    juce::roundToInt(static_cast<float>(cfg.h) * cfg.s),
+                                    true);
+
+                // Idle full editor
+                measureScenario(juce::String("FullEditor Idle ") + cfg.tag, 12, 60, [&](int)
+                {
+                    renderIntoImage(*ed, backing, cfg.s);
+                });
+
+                // Active full editor with 45Hz telemetry updates
+                measureScenario(juce::String("FullEditor Active 45Hz ") + cfg.tag, 12, 60, [&](int f)
+                {
+                    pump45HzFrame(f);
+                    renderIntoImage(*ed, backing, cfg.s);
+                });
+
+                if (run == 1)
+                {
+                    const size_t cacheBytes = ed->getEstimatedGraphicCacheBytes();
+                    std::cout << "[CACHE] " << cfg.tag
+                              << " estimated_cache_kb=" << juce::String(static_cast<double>(cacheBytes) / 1024.0, 1)
+                              << " KB (" << cacheBytes << " B)" << std::endl;
+                }
+
+                // Scope + Meter active @ 45Hz
+                juce::Image scopeImg(juce::Image::ARGB,
+                                     juce::jmax(1, juce::roundToInt(static_cast<float>(scope.getWidth()) * cfg.s)),
+                                     juce::jmax(1, juce::roundToInt(static_cast<float>(scope.getHeight()) * cfg.s)),
+                                     true);
+                juce::Image meterImg(juce::Image::ARGB,
+                                     meter != nullptr ? juce::jmax(1, juce::roundToInt(static_cast<float>(meter->getWidth()) * cfg.s)) : 16,
+                                     meter != nullptr ? juce::jmax(1, juce::roundToInt(static_cast<float>(meter->getHeight()) * cfg.s)) : 100,
+                                     true);
+                measureScenario(juce::String("Scope+Meter Active ") + cfg.tag, 12, 60, [&](int f)
+                {
+                    pump45HzFrame(f);
+                    renderIntoImage(scope, scopeImg, cfg.s);
+                    if (meter != nullptr)
+                        renderIntoImage(*meter, meterImg, cfg.s);
+                });
+            }
+
+            // Per-component hotspot breakdown on primary 780x580 @ 1x
+            ed->setSize(780, 580);
+            pump45HzFrame(0);
+            auto profileComp = [&](const juce::String& label, juce::Component& c)
+            {
+                juce::Image cImg(juce::Image::ARGB, juce::jmax(1, c.getWidth()), juce::jmax(1, c.getHeight()), true);
+                measureScenario(juce::String("Hotspot[780x580 1x] ") + label, 12, 60, [&](int)
+                {
+                    renderIntoImage(c, cImg, 1.0f);
+                });
+            };
+
+            if (header != nullptr)    profileComp("HeaderPanel", *header);
+            profileComp("NapWaveVisualizer (Scope)", scope);
+            if (primary != nullptr)
+            {
+                profileComp("PrimaryKnobsPanel (All 5 knobs + chassis + meter)", *primary);
+                for (int k = 0; k < AllyGUI::PrimaryKnobsPanel::knobCount; ++k)
+                    if (auto* knob = primary->getKnob(k))
+                        profileComp(juce::String("  Single DepthRingKnob[") + juce::String(k) + "]", *knob);
+                if (meter != nullptr)
+                    profileComp("  OutputLevelMeter", *meter);
+            }
+            if (secondary != nullptr) profileComp("SecondaryDspPanel (with children)", *secondary);
+            if (kbPanel != nullptr)   profileComp("KeyboardPanel (with 37 keys)", *kbPanel);
+
+            // Knob drag simulation (Diepte, Haven Dirt, Output across 60 steps)
+            if (primary != nullptr)
+            {
+                juce::Image primImg(juce::Image::ARGB, primary->getWidth(), primary->getHeight(), true);
+                measureScenario("KnobDrag(Diepte+HavenDirt+Output) PrimaryPanel paint", 12, 60, [&](int f)
+                {
+                    const float norm = 0.1f + 0.8f * (static_cast<float>(f % 30) / 29.0f);
+                    setParamPlainValue(proc.apvts, "diepte", norm);
+                    setParamPlainValue(proc.apvts, "havenDirt", norm);
+                    setParamPlainValue(proc.apvts, "masterVolume", -24.0f + norm * 30.0f);
+                    renderIntoImage(*primary, primImg, 1.0f);
+                });
+            }
+
+            // Preset switching + full editor repaint
+            {
+                juce::Image edImg(juce::Image::ARGB, 780, 580, true);
+                measureScenario("PresetSwitch + FullEditor 780x580 1x", 12, 60, [&](int f)
+                {
+                    proc.setCurrentProgram(f % proc.getNumPrograms());
+                    renderIntoImage(*ed, edImg, 1.0f);
+                });
+            }
+
+            // Window resize + repaint across 680x500 / 780x580 / 1200x850
+            {
+                const juce::Point<int> resizes[] = { { 680, 500 }, { 780, 580 }, { 1200, 850 } };
+                juce::Image resizeBacking(juce::Image::ARGB, 1200, 850, true);
+                measureScenario("WindowResize + FullEditor 1x", 12, 60, [&](int f)
+                {
+                    const auto sz = resizes[f % 3];
+                    ed->setSize(sz.x, sz.y);
+                    juce::Graphics g(resizeBacking);
+                    ed->paintEntireComponent(g, true);
+                });
+                ed->setSize(780, 580);
+            }
+
+            // Audio thread CPU measurement with active GUI open vs headless
+            {
+                proc.prepareToPlay(48000.0, 256);
+                std::atomic<bool> stopGui { false };
+                std::thread fakeGuiReader([&]()
+                {
+                    std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> tmp {};
+                    while (!stopGui.load(std::memory_order_acquire))
+                    {
+                        proc.getVisualizerData(tmp.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+                        (void) proc.consumeOutputMeterMetrics();
+                        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    }
+                });
+
+                midiBuf.addEvent(juce::MidiMessage::noteOn(1, 36, 0.92f), 0);
+                measureScenario("AudioThread processBlock(256 @ 48kHz) w/ GUI telemetry", 20, 240, [&](int)
+                {
+                    audioBuf.clear();
+                    proc.processBlock(audioBuf, midiBuf);
+                    midiBuf.clear();
+                });
+                midiBuf.addEvent(juce::MidiMessage::noteOff(1, 36), 0);
+                audioBuf.clear();
+                proc.processBlock(audioBuf, midiBuf);
+                midiBuf.clear();
+
+                stopGui.store(true, std::memory_order_release);
+                fakeGuiReader.join();
+            }
         }
 
         return 0;

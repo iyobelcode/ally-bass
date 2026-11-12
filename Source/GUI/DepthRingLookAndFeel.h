@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "EngineeredDepthTheme.h"
 #include "EngineeredDepthIcons.h"
@@ -41,6 +42,37 @@ public:
                           float rotaryStartAngle,
                           float rotaryEndAngle,
                           juce::Slider& slider) override;
+
+    size_t getEstimatedCacheBytes() const noexcept;
+
+private:
+    struct TickGeom
+    {
+        float x1 = 0.0f;
+        float y1 = 0.0f;
+        float x2 = 0.0f;
+        float y2 = 0.0f;
+        float angle = 0.0f;
+        bool isMajor = false;
+        bool isCardinal9 = false;
+    };
+
+    juce::Image cachedOuterBack;
+    int cachedOuterW = 0;
+    int cachedOuterH = 0;
+    float cachedOuterScale = 0.0f;
+    uint32_t cachedOuterKey = 0u;
+    float cachedStartAngle = -1.0f;
+    float cachedEndAngle = -1.0f;
+    juce::Path cachedTrackPath;
+    std::array<TickGeom, 23> cachedTicks {};
+
+    juce::Image cachedInnerBody;
+    int cachedInnerW = 0;
+    int cachedInnerH = 0;
+    float cachedInnerScale = 0.0f;
+    uint32_t cachedInnerKey = 0u;
+    float cachedInnerNorm = -2.0f;
 };
 
 } // namespace AllyGUI

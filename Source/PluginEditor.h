@@ -48,6 +48,7 @@ public:
     void openSavePresetModal();
     void openUserPresetAsync();
     void closeModalOverlays();
+    size_t getEstimatedGraphicCacheBytes() const noexcept;
 
 private:
     static constexpr int kMinOctave = 0;
@@ -89,6 +90,12 @@ private:
 
     void setupHeaderAndModals();
     void updateKeyboardRange();
+
+    mutable juce::Image cachedBackdropStrip;
+    mutable int   cachedBackdropW = 0;
+    mutable int   cachedBackdropH = 0;
+    mutable int   cachedFooterH   = 0;
+    mutable float cachedBackdropScale = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AllyBassAudioProcessorEditor)
 };

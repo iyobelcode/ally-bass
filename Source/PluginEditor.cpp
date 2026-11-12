@@ -409,35 +409,65 @@ void AllyBassAudioProcessorEditor::paint(juce::Graphics& g)
 {
     using Theme = AllyGUI::EngineeredDepthTheme;
 
-    const auto bounds = getLocalBounds().toFloat();
     const auto m = computeLayoutMetrics();
-
-    // 1. Unified Abyssal Marine Console Backdrop across the entire window
-    juce::ColourGradient bgGrad(
-        Theme::Colors::bg, bounds.getCentreX(), 0.0f,
-        juce::Colour(0xff040a0e), bounds.getCentreX(), bounds.getBottom(),
-        false);
-    bgGrad.addColour(0.38, juce::Colour(0xff081822));
-    g.setGradientFill(bgGrad);
-    g.fillRect(bounds);
-
-    // 2. Crisp Engineered Depth Footer Bay
     const auto footerArea = getFooterBounds().toFloat();
+
+    // 1. Cached full-width window backdrop + footer gradient (avoids gradient dither stretching)
+    const int w = getWidth();
+    const int h = getHeight();
+    const int fh = getFooterBounds().getHeight();
+    const float scale = juce::jmax(1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    if (!cachedBackdropStrip.isValid()
+        || cachedBackdropW != w
+        || cachedBackdropH != h
+        || cachedFooterH != fh
+        || std::abs(cachedBackdropScale - scale) > 0.01f)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedBackdropStrip = juce::Image(juce::Image::ARGB, rw, rh, true);
+        juce::Graphics cacheG(cachedBackdropStrip);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+
+        const float wf = static_cast<float>(w);
+        const float hf = static_cast<float>(h);
+        juce::ColourGradient bgGrad(
+            Theme::Colors::bg, wf * 0.5f, 0.0f,
+            juce::Colour(0xff040a0e), wf * 0.5f, hf,
+            false);
+        bgGrad.addColour(0.38, juce::Colour(0xff081822));
+        cacheG.setGradientFill(bgGrad);
+        cacheG.fillRect(0.0f, 0.0f, wf, hf);
+
+        if (!footerArea.isEmpty())
+        {
+            juce::ColourGradient footerGrad(
+                juce::Colour(0xff050e15), footerArea.getCentreX(), footerArea.getY(),
+                juce::Colour(0xff03080c), footerArea.getCentreX(), footerArea.getBottom(),
+                false);
+            cacheG.setGradientFill(footerGrad);
+            cacheG.fillRect(footerArea);
+
+            // Metallic top divider & specular micro-hairline
+            cacheG.setColour(Theme::Colors::strokeSubtle.withAlpha(0.74f));
+            cacheG.drawHorizontalLine(juce::roundToInt(footerArea.getY()), 0.0f, wf);
+            cacheG.setColour(Theme::Colors::metalRimLight.withAlpha(0.09f));
+            cacheG.drawHorizontalLine(juce::roundToInt(footerArea.getY()) + 1, 0.0f, wf);
+        }
+
+        cachedBackdropW = w;
+        cachedBackdropH = h;
+        cachedFooterH   = fh;
+        cachedBackdropScale = scale;
+    }
+
+    g.drawImage(cachedBackdropStrip,
+                0, 0, w, h,
+                0, 0, cachedBackdropStrip.getWidth(), cachedBackdropStrip.getHeight());
+
+    // 2. Crisp Engineered Depth Footer Bay text & status LED
     if (footerArea.isEmpty())
         return;
-
-    juce::ColourGradient footerGrad(
-        juce::Colour(0xff050e15), footerArea.getCentreX(), footerArea.getY(),
-        juce::Colour(0xff03080c), footerArea.getCentreX(), footerArea.getBottom(),
-        false);
-    g.setGradientFill(footerGrad);
-    g.fillRect(footerArea);
-
-    // Metallic top divider & specular micro-hairline
-    g.setColour(Theme::Colors::strokeSubtle.withAlpha(0.74f));
-    g.drawHorizontalLine(juce::roundToInt(footerArea.getY()), 0.0f, bounds.getRight());
-    g.setColour(Theme::Colors::metalRimLight.withAlpha(0.09f));
-    g.drawHorizontalLine(juce::roundToInt(footerArea.getY()) + 1, 0.0f, bounds.getRight());
 
     const auto content = footerArea.reduced(static_cast<float>(m.sideMargin), 0.0f);
     const float fontPt = juce::jlimit(8.8f, 11.2f, footerArea.getHeight() * 0.35f);
@@ -514,4 +544,22 @@ void AllyBassAudioProcessorEditor::resized()
         settingsOverlay->setBounds(fullBounds);
     if (savePresetOverlay != nullptr)
         savePresetOverlay->setBounds(fullBounds);
+    cachedBackdropH = 0;
+}
+
+size_t AllyBassAudioProcessorEditor::getEstimatedGraphicCacheBytes() const noexcept
+{
+    size_t bytes = cachedBackdropStrip.isValid()
+        ? static_cast<size_t>(cachedBackdropStrip.getWidth()) * static_cast<size_t>(cachedBackdropStrip.getHeight()) * 4u
+        : 0u;
+    bytes += visualizer.getEstimatedCacheBytes();
+    if (headerPanel != nullptr)
+        bytes += headerPanel->getEstimatedCacheBytes();
+    if (primaryKnobsPanel != nullptr)
+        bytes += primaryKnobsPanel->getEstimatedCacheBytes();
+    if (secondaryDspPanel != nullptr)
+        bytes += secondaryDspPanel->getEstimatedCacheBytes();
+    if (keyboardPanel != nullptr)
+        bytes += keyboardPanel->getEstimatedCacheBytes();
+    return bytes;
 }

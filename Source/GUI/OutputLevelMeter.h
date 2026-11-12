@@ -44,6 +44,12 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    size_t getEstimatedCacheBytes() const noexcept
+    {
+        return cachedStaticHousing.isValid()
+            ? static_cast<size_t>(cachedStaticHousing.getWidth()) * static_cast<size_t>(cachedStaticHousing.getHeight()) * 4u
+            : 0u;
+    }
     void mouseDown(const juce::MouseEvent& e) override;
 
     // Accessors for deterministic unit/UI inspection
@@ -61,6 +67,13 @@ public:
 private:
     void timerCallback() override;
     juce::Rectangle<float> getHousingBounds() const noexcept;
+    void renderStaticHousingToCache(juce::Graphics& g,
+                                    juce::Rectangle<float> housing,
+                                    juce::Rectangle<float> matrix,
+                                    float pitch,
+                                    float gap,
+                                    float segH,
+                                    float segCorner) const;
 
     AllyBassAudioProcessor* processor = nullptr;
 
@@ -74,6 +87,11 @@ private:
     int      staleCounterFrames   = 0;
     uint32_t lastRepaintTicksMs   = 0;
     bool     settledSilent        = true;
+
+    mutable juce::Image cachedStaticHousing;
+    mutable int   cachedW = 0;
+    mutable int   cachedH = 0;
+    mutable float cachedScale = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OutputLevelMeter)
 };

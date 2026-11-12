@@ -212,18 +212,42 @@ void OutputLevelMeter::mouseDown(const juce::MouseEvent&)
     clearClipHold();
 }
 
-void OutputLevelMeter::paint(juce::Graphics& g)
+void OutputLevelMeter::renderStaticHousingToCache(juce::Graphics& g,
+                                                  juce::Rectangle<float> housing,
+                                                  juce::Rectangle<float> matrix,
+                                                  float pitch,
+                                                  float gap,
+                                                  float segH,
+                                                  float segCorner) const
 {
-    const auto housing = getHousingBounds();
-    if (housing.getWidth() < 6.0f || housing.getHeight() < 24.0f)
-        return;
-
     // 1. Subtle dark recessed meter housing (no heavy contrasting frame border)
     const float radius = juce::jlimit(2.0f, 4.0f, housing.getWidth() * 0.22f);
     g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.42f));
     g.fillRoundedRectangle(housing, radius);
     g.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.18f));
     g.drawRoundedRectangle(housing, radius, 0.75f);
+
+    // 2. Unlit LED slots + bevel top sheens
+    for (int i = 0; i < numSegments; ++i)
+    {
+        const float segTop = matrix.getBottom() - static_cast<float>(i + 1) * pitch + gap * 0.5f;
+        const juce::Rectangle<float> segRect(matrix.getX(), segTop, matrix.getWidth(), segH);
+
+        const bool isTopClipSeg = (i == numSegments - 1);
+        const juce::Colour offFill = isTopClipSeg
+            ? juce::Colour(0xff161116)
+            : EngineeredDepthTheme::Colors::trackDark.darker(0.36f);
+
+        g.setColour(offFill);
+        g.fillRoundedRectangle(segRect, segCorner);
+    }
+}
+
+void OutputLevelMeter::paint(juce::Graphics& g)
+{
+    const auto housing = getHousingBounds();
+    if (housing.getWidth() < 6.0f || housing.getHeight() < 24.0f)
+        return;
 
     // 2. Segmented LED matrix area
     const float hPad = juce::jlimit(1.2f, 2.2f, housing.getWidth() * 0.12f);
@@ -236,6 +260,29 @@ void OutputLevelMeter::paint(juce::Graphics& g)
     const float gap   = juce::jlimit(1.4f, 2.8f, pitch * 0.30f);
     const float segH  = juce::jmax(1.5f, pitch - gap);
     const float segCorner = juce::jlimit(0.8f, 1.8f, segH * 0.32f);
+
+    const int w = getWidth();
+    const int h = getHeight();
+    const float scale = juce::jmax(1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    if (!cachedStaticHousing.isValid()
+        || cachedW != w
+        || cachedH != h
+        || std::abs(cachedScale - scale) > 0.01f)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedStaticHousing = juce::Image(juce::Image::ARGB, rw, rh, true);
+        juce::Graphics cacheG(cachedStaticHousing);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        renderStaticHousingToCache(cacheG, housing, matrix, pitch, gap, segH, segCorner);
+        cachedW = w;
+        cachedH = h;
+        cachedScale = scale;
+    }
+
+    g.drawImage(cachedStaticHousing,
+                0, 0, w, h,
+                0, 0, cachedStaticHousing.getWidth(), cachedStaticHousing.getHeight());
 
     const int peakCount = dbToSegmentCount(displayedPeakDb);
     const int rmsCount  = dbToSegmentCount(displayedRmsDb);
@@ -259,14 +306,6 @@ void OutputLevelMeter::paint(juce::Graphics& g)
         const bool litPeak  = (i < peakCount);
         const bool litHold  = (i == holdIdx) && (holdIdx >= 0);
         const bool litClip  = isTopClipSeg && clipOn;
-
-        juce::Colour offFill = isTopClipSeg
-            ? juce::Colour(0xff161116)
-            : EngineeredDepthTheme::Colors::trackDark.darker(0.36f);
-
-        // Unlit LED slot background + subtle bevel top sheen
-        g.setColour(offFill);
-        g.fillRoundedRectangle(segRect, segCorner);
 
         if (!litRms && !litPeak && !litHold && !litClip)
         {
@@ -330,6 +369,8 @@ void OutputLevelMeter::paint(juce::Graphics& g)
 
 void OutputLevelMeter::resized()
 {
+    cachedW = 0;
+    cachedH = 0;
 }
 
 } // namespace AllyGUI

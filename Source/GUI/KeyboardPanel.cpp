@@ -6,6 +6,7 @@ namespace AllyGUI
 
 EngineeredDepthKeyboard::EngineeredDepthKeyboard(juce::MidiKeyboardState& state)
     : juce::MidiKeyboardComponent(state, juce::MidiKeyboardComponent::horizontalKeyboard)
+    , keyboardStateRef(state)
 {
     clearKeyMappings();
     setWantsKeyboardFocus(false);
@@ -29,12 +30,100 @@ void EngineeredDepthKeyboard::resized()
 {
     if (getWidth() > 22)
         setKeyWidth(static_cast<float>(getWidth()) / 22.0f);
+    cachedW = 0;
+    cachedH = 0;
     juce::MidiKeyboardComponent::resized();
+}
+
+void EngineeredDepthKeyboard::updateHoverNote(juce::Point<float> pos) noexcept
+{
+    currentHoverNote = isMouseOver(false) ? getNoteAndVelocityAtPosition(pos).note : -1;
 }
 
 void EngineeredDepthKeyboard::mouseDown(const juce::MouseEvent& e)
 {
+    updateHoverNote(e.position);
     juce::MidiKeyboardComponent::mouseDown(e);
+}
+
+void EngineeredDepthKeyboard::mouseMove(const juce::MouseEvent& e)
+{
+    updateHoverNote(e.position);
+    juce::MidiKeyboardComponent::mouseMove(e);
+}
+
+void EngineeredDepthKeyboard::mouseDrag(const juce::MouseEvent& e)
+{
+    updateHoverNote(e.position);
+    juce::MidiKeyboardComponent::mouseDrag(e);
+}
+
+void EngineeredDepthKeyboard::mouseEnter(const juce::MouseEvent& e)
+{
+    updateHoverNote(e.position);
+    juce::MidiKeyboardComponent::mouseEnter(e);
+}
+
+void EngineeredDepthKeyboard::mouseExit(const juce::MouseEvent& e)
+{
+    currentHoverNote = -1;
+    juce::MidiKeyboardComponent::mouseExit(e);
+}
+
+void EngineeredDepthKeyboard::paint(juce::Graphics& g)
+{
+    const int w = getWidth();
+    const int h = getHeight();
+    if (w <= 0 || h <= 0)
+        return;
+
+    const int rStart = getRangeStart();
+    const int rEnd   = getRangeEnd();
+    const int span   = rEnd - rStart + 1;
+    if (span <= 0 || span > 64)
+    {
+        juce::MidiKeyboardComponent::paint(g);
+        return;
+    }
+
+    uint64_t downMask = 0;
+    for (int note = rStart; note <= rEnd; ++note)
+    {
+        if (keyboardStateRef.isNoteOnForChannels(0xffff, note))
+            downMask |= (uint64_t { 1 } << static_cast<unsigned>(note - rStart));
+    }
+
+    const int hoverNote = isMouseOver(false) ? currentHoverNote : -1;
+    const float scale   = juce::jmax(1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+
+    if (!cachedKeyboardImage.isValid()
+        || cachedW != w
+        || cachedH != h
+        || std::abs(cachedScale - scale) > 0.01f
+        || cachedRangeStart != rStart
+        || cachedRangeEnd != rEnd
+        || cachedDownMask != downMask
+        || cachedHoverNote != hoverNote)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedKeyboardImage = juce::Image(juce::Image::ARGB, rw, rh, true);
+        juce::Graphics cacheG(cachedKeyboardImage);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        juce::MidiKeyboardComponent::paint(cacheG);
+
+        cachedW          = w;
+        cachedH          = h;
+        cachedScale      = scale;
+        cachedRangeStart = rStart;
+        cachedRangeEnd   = rEnd;
+        cachedDownMask   = downMask;
+        cachedHoverNote  = hoverNote;
+    }
+
+    g.drawImage(cachedKeyboardImage,
+                0, 0, w, h,
+                0, 0, cachedKeyboardImage.getWidth(), cachedKeyboardImage.getHeight());
 }
 
 void EngineeredDepthKeyboard::drawWhiteNote(int midiNoteNumber,
@@ -420,13 +509,12 @@ void KeyboardPanel::resized()
     keyboard.setBounds(keyboardBedBounds);
     if (keyboardBedBounds.getWidth() > 22)
         keyboard.setKeyWidth(static_cast<float>(keyboardBedBounds.getWidth()) / 22.0f);
+    cachedChassisW = 0;
+    cachedChassisH = 0;
 }
 
-void KeyboardPanel::paint(juce::Graphics& g)
+void KeyboardPanel::renderChassisToCache(juce::Graphics& g) const
 {
-    if (chassisBounds.isEmpty())
-        return;
-
     const float chamfer = juce::jlimit(7.0f, 13.0f, chassisBounds.getHeight() * 0.16f);
     const auto outerPath = EngineeredDepthTheme::buildChamferedRectPath(chassisBounds, chamfer, chamfer);
 
@@ -465,15 +553,6 @@ void KeyboardPanel::paint(juce::Graphics& g)
     g.drawLine(chassisBounds.getX() + chamfer, chassisBounds.getY() + 1.0f,
                chassisBounds.getRight() - chamfer, chassisBounds.getY() + 1.0f, 1.1f);
 
-    // 3. Compact Octave Readout (OCT: C2) centered cleanly between - and + buttons
-    if (!octaveReadoutBounds.isEmpty())
-    {
-        const float octFontSize = juce::jlimit(9.2f, 11.5f, octaveReadoutBounds.getHeight() * 0.41f);
-        g.setFont(EngineeredDepthTheme::makeDataFont(octFontSize, true));
-        g.setColour(EngineeredDepthTheme::Colors::cyan);
-        g.drawText(getDisplayedOctaveText(), octaveReadoutBounds, juce::Justification::centred, false);
-    }
-
     // 4. Vertical bay separator between Octave Control and Piano Keybed
     if (dividerX > chassisBounds.getX())
     {
@@ -493,6 +572,44 @@ void KeyboardPanel::paint(juce::Graphics& g)
         g.drawRoundedRectangle(bed, 3.0f, 1.2f);
         g.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.55f));
         g.drawRoundedRectangle(bed.expanded(0.8f), 3.5f, 0.85f);
+    }
+}
+
+void KeyboardPanel::paint(juce::Graphics& g)
+{
+    if (chassisBounds.isEmpty())
+        return;
+
+    const int w = getWidth();
+    const int h = getHeight();
+    const float scale = juce::jmax(1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    if (!cachedChassisImage.isValid()
+        || cachedChassisW != w
+        || cachedChassisH != h
+        || std::abs(cachedChassisScale - scale) > 0.01f)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedChassisImage = juce::Image(juce::Image::ARGB, rw, rh, true);
+        juce::Graphics cacheG(cachedChassisImage);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        renderChassisToCache(cacheG);
+        cachedChassisW = w;
+        cachedChassisH = h;
+        cachedChassisScale = scale;
+    }
+
+    g.drawImage(cachedChassisImage,
+                0, 0, w, h,
+                0, 0, cachedChassisImage.getWidth(), cachedChassisImage.getHeight());
+
+    // 3. Compact Octave Readout (OCT: C2) centered cleanly between - and + buttons
+    if (!octaveReadoutBounds.isEmpty())
+    {
+        const float octFontSize = juce::jlimit(9.2f, 11.5f, octaveReadoutBounds.getHeight() * 0.41f);
+        g.setFont(EngineeredDepthTheme::makeDataFont(octFontSize, true));
+        g.setColour(EngineeredDepthTheme::Colors::cyan);
+        g.drawText(getDisplayedOctaveText(), octaveReadoutBounds, juce::Justification::centred, false);
     }
 }
 

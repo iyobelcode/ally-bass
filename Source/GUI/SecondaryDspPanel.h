@@ -42,8 +42,11 @@ public:
 
     juce::Rectangle<float> getChassisBounds() const noexcept { return chassisBounds; }
     float getDividerX(int index) const noexcept;
+    size_t getEstimatedCacheBytes() const noexcept;
 
 private:
+    void renderPanelToCache(juce::Graphics& g) const;
+
     std::unique_ptr<EngineeredDepthComboBox> stadsdeelControl;
     std::unique_ptr<DepthRingKnob> attackKnob;
     std::unique_ptr<DepthRingKnob> releaseKnob;
@@ -52,6 +55,11 @@ private:
 
     juce::Rectangle<float> chassisBounds;
     std::array<float, 3> dividerX {};
+
+    mutable juce::Image cachedPanelImage;
+    mutable int cachedW = 0;
+    mutable int cachedH = 0;
+    mutable float cachedScale = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SecondaryDspPanel)
 };

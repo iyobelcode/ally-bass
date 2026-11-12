@@ -99,7 +99,10 @@ void PrimaryKnobsPanel::parameterChanged(const juce::String& parameterID, float 
 
 void PrimaryKnobsPanel::handleAsyncUpdate()
 {
-    repaint();
+    if (!centerRepaintBounds.isEmpty())
+        repaint(centerRepaintBounds);
+    else
+        repaint();
 }
 
 DepthRingKnob* PrimaryKnobsPanel::getKnob(int index) const noexcept
@@ -179,11 +182,46 @@ void PrimaryKnobsPanel::resized()
     const int meterIntH = juce::jmax(32, juce::roundToInt(meterBotY - meterTopY));
     outputMeter.setBounds(meterX, meterIntY, meterIntW, meterIntH);
 
+    cachedCenterBayPath.clear();
+    cachedCenterWallsPath.clear();
+    centerRepaintBounds = {};
+    if (!slotBounds[2].isEmpty())
+    {
+        const float yTop     = chassisBounds.getY() + 2.0f;
+        const float yBot     = chassisBounds.getBottom() - 2.0f;
+        const float bendY    = chassisBounds.getY() + topChamfer * 1.18f;
+        const float botBendY = chassisBounds.getBottom() - bottomChamfer * 1.15f;
+        const float bendDx   = topChamfer * 0.85f;
+        const float midLeftX  = static_cast<float>(slotBounds[2].getX());
+        const float midRightX = static_cast<float>(slotBounds[2].getRight());
+
+        cachedCenterBayPath.startNewSubPath(midLeftX - bendDx, yTop + 2.0f);
+        cachedCenterBayPath.lineTo(midRightX + bendDx, yTop + 2.0f);
+        cachedCenterBayPath.lineTo(midRightX + 1.0f, bendY);
+        cachedCenterBayPath.lineTo(midRightX + 1.0f, botBendY);
+        cachedCenterBayPath.lineTo(midRightX + bendDx, yBot - 2.0f);
+        cachedCenterBayPath.lineTo(midLeftX - bendDx, yBot - 2.0f);
+        cachedCenterBayPath.lineTo(midLeftX - 1.0f, botBendY);
+        cachedCenterBayPath.lineTo(midLeftX - 1.0f, bendY);
+        cachedCenterBayPath.closeSubPath();
+
+        cachedCenterWallsPath.startNewSubPath(midLeftX - bendDx, yTop + 1.0f);
+        cachedCenterWallsPath.lineTo(midLeftX - 1.0f, bendY);
+        cachedCenterWallsPath.lineTo(midLeftX - 1.0f, botBendY);
+        cachedCenterWallsPath.lineTo(midLeftX - bendDx, yBot - 1.0f);
+        cachedCenterWallsPath.startNewSubPath(midRightX + bendDx, yTop + 1.0f);
+        cachedCenterWallsPath.lineTo(midRightX + 1.0f, bendY);
+        cachedCenterWallsPath.lineTo(midRightX + 1.0f, botBendY);
+        cachedCenterWallsPath.lineTo(midRightX + bendDx, yBot - 1.0f);
+
+        centerRepaintBounds = cachedCenterBayPath.getBounds().expanded(4.0f).getSmallestIntegerContainer();
+    }
+
     cachedW = 0;
     cachedH = 0;
 }
 
-void PrimaryKnobsPanel::renderChassisToCache(juce::Graphics& g, float dirtLevel) const
+void PrimaryKnobsPanel::renderStaticChassisToCache(juce::Graphics& g) const
 {
     const float topChamfer    = juce::jlimit(8.0f, 18.0f, chassisBounds.getHeight() * 0.078f);
     const float bottomChamfer = juce::jlimit(7.0f, 15.0f, chassisBounds.getHeight() * 0.064f);
@@ -267,27 +305,16 @@ void PrimaryKnobsPanel::renderChassisToCache(juce::Graphics& g, float dirtLevel)
             g.fillPath(rightBay);
 
             // Sculpted chamfered hexagonal center compartment framing HAVEN DIRT
-            juce::Path centerBay;
-            centerBay.startNewSubPath(midLeftX - bendDx, yTop + 2.0f);
-            centerBay.lineTo(midRightX + bendDx, yTop + 2.0f);
-            centerBay.lineTo(midRightX + 1.0f, bendY);
-            centerBay.lineTo(midRightX + 1.0f, botBendY);
-            centerBay.lineTo(midRightX + bendDx, yBot - 2.0f);
-            centerBay.lineTo(midLeftX - bendDx, yBot - 2.0f);
-            centerBay.lineTo(midLeftX - 1.0f, botBendY);
-            centerBay.lineTo(midLeftX - 1.0f, bendY);
-            centerBay.closeSubPath();
-
             juce::ColourGradient centerGrad(juce::Colour(0xff0f1c24), midLeftX, yTop,
                                             juce::Colour(0xff040b10), midLeftX, yBot, false);
             centerGrad.addColour(0.50, juce::Colour(0xff08131a));
             g.setGradientFill(centerGrad);
-            g.fillPath(centerBay);
+            g.fillPath(cachedCenterBayPath);
 
-            // Soft recessed circular seat halos under each of the 5 knobs so knobs nest cleanly in the chassis
+            // Soft recessed circular seat halos under wing knobs (center Haven Dirt halo sits above red bay spill)
             for (int i = 0; i < knobCount; ++i)
             {
-                if (knobs[static_cast<size_t>(i)] == nullptr || knobs[static_cast<size_t>(i)]->getDialBounds().isEmpty())
+                if (i == 2 || knobs[static_cast<size_t>(i)] == nullptr || knobs[static_cast<size_t>(i)]->getDialBounds().isEmpty())
                     continue;
                 const auto dialLocal = knobs[static_cast<size_t>(i)]->getDialBounds();
                 const float cx = static_cast<float>(knobs[static_cast<size_t>(i)]->getX()) + dialLocal.getCentreX();
@@ -300,67 +327,20 @@ void PrimaryKnobsPanel::renderChassisToCache(juce::Graphics& g, float dirtLevel)
                 g.fillEllipse(cx - haloR, cy - haloR, haloR * 2.0f, haloR * 2.0f);
             }
 
-            // Center HAVEN DIRT red ambient chassis spill (both central glow and upper red bar bounce)
-            const auto& havenSlot = slotBounds[2];
-            const auto havenCentre = havenSlot.getCentre().toFloat();
-            const float spillR = static_cast<float>(havenSlot.getWidth()) * 0.72f;
-            const float redAlpha = 0.06f + 0.11f * dirtLevel;
-
-            juce::ColourGradient redSpill(EngineeredDepthTheme::Colors::red.withAlpha(redAlpha),
-                                          havenCentre.x - spillR * 0.18f, havenCentre.y + 4.0f,
-                                          juce::Colours::transparentBlack,
-                                          havenCentre.x + spillR * 0.82f, havenCentre.y + 4.0f,
-                                          true);
-            g.setGradientFill(redSpill);
-            g.fillPath(centerBay);
-
-            // Top red pill light reflection onto center upper bezel plate
-            const float redTopY = static_cast<float>(havenSlot.getY()) + 16.0f;
-            juce::ColourGradient topRedGlint(EngineeredDepthTheme::Colors::red.withAlpha(0.08f + 0.08f * dirtLevel),
-                                             havenCentre.x, redTopY,
-                                             juce::Colours::transparentBlack,
-                                             havenCentre.x + spillR * 0.45f, redTopY,
-                                             true);
-            g.setGradientFill(topRedGlint);
-            g.fillPath(centerBay);
-
-            // Crisp machined bay contour & bevel highlight lines separating panels
-            auto drawBevelSeam = [&](const juce::Path& linePath, juce::Colour baseCol, float peakAlpha)
-            {
-                juce::ColourGradient seamGrad(baseCol.withAlpha(peakAlpha * 0.65f), 0.0f, yTop,
-                                              baseCol.withAlpha(peakAlpha * 0.28f), 0.0f, yBot, false);
-                seamGrad.addColour(0.45, baseCol.withAlpha(peakAlpha));
-                g.setGradientFill(seamGrad);
-                g.strokePath(linePath, juce::PathStrokeType(1.15f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
-            };
-
-            // Open-ended chamfered left/right bay separator walls framing HAVEN DIRT compartment cleanly
-            juce::Path centerWalls;
-            centerWalls.startNewSubPath(midLeftX - bendDx, yTop + 1.0f);
-            centerWalls.lineTo(midLeftX - 1.0f, bendY);
-            centerWalls.lineTo(midLeftX - 1.0f, botBendY);
-            centerWalls.lineTo(midLeftX - bendDx, yBot - 1.0f);
-
-            centerWalls.startNewSubPath(midRightX + bendDx, yTop + 1.0f);
-            centerWalls.lineTo(midRightX + 1.0f, bendY);
-            centerWalls.lineTo(midRightX + 1.0f, botBendY);
-            centerWalls.lineTo(midRightX + bendDx, yBot - 1.0f);
-
-            g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.80f));
-            g.strokePath(centerWalls, juce::PathStrokeType(2.2f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
-
-            const auto centerSeamCol = EngineeredDepthTheme::Colors::metalRimLight
-                                           .interpolatedWith(EngineeredDepthTheme::Colors::red, 0.10f + 0.24f * dirtLevel);
-            drawBevelSeam(centerWalls, centerSeamCol, 0.44f);
-
-            // Vertical subtle seam separating WATERWIJK GLIDE & OUTPUT + between DIEPTE & POLDER PUNCH
+            // Static side separator seams between DIEPTE & POLDER PUNCH + WATERWIJK GLIDE & OUTPUT
             for (int sepIdx : { 0, 3 })
             {
                 const float sx = static_cast<float>(slotBounds[static_cast<size_t>(sepIdx)].getRight());
                 juce::Path p;
                 p.startNewSubPath(sx, yTop + 10.0f);
                 p.lineTo(sx, yBot - 10.0f);
-                drawBevelSeam(p, EngineeredDepthTheme::Colors::stroke, 0.24f);
+
+                const auto baseCol = EngineeredDepthTheme::Colors::stroke;
+                juce::ColourGradient seamGrad(baseCol.withAlpha(0.24f * 0.65f), 0.0f, yTop,
+                                              baseCol.withAlpha(0.24f * 0.28f), 0.0f, yBot, false);
+                seamGrad.addColour(0.45, baseCol.withAlpha(0.24f));
+                g.setGradientFill(seamGrad);
+                g.strokePath(p, juce::PathStrokeType(1.15f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
             }
         }
 
@@ -392,6 +372,72 @@ void PrimaryKnobsPanel::renderChassisToCache(juce::Graphics& g, float dirtLevel)
     g.strokePath(topRimHighlight, juce::PathStrokeType(1.2f, juce::PathStrokeType::beveled, juce::PathStrokeType::butt));
 }
 
+void PrimaryKnobsPanel::renderDynamicHavenGlow(juce::Graphics& g, float dirtLevel) const
+{
+    if (slotBounds[0].isEmpty() || slotBounds[2].isEmpty() || slotBounds[4].isEmpty() || cachedCenterBayPath.isEmpty())
+        return;
+
+    const float yTop = chassisBounds.getY() + 2.0f;
+    const float yBot = chassisBounds.getBottom() - 2.0f;
+    const auto& havenSlot = slotBounds[2];
+    const auto havenCentre = havenSlot.getCentre().toFloat();
+    const float spillR = static_cast<float>(havenSlot.getWidth()) * 0.72f;
+    const float redAlpha = 0.06f + 0.11f * dirtLevel;
+
+    juce::ColourGradient redSpill(EngineeredDepthTheme::Colors::red.withAlpha(redAlpha),
+                                  havenCentre.x - spillR * 0.18f, havenCentre.y + 4.0f,
+                                  juce::Colours::transparentBlack,
+                                  havenCentre.x + spillR * 0.82f, havenCentre.y + 4.0f,
+                                  true);
+    g.setGradientFill(redSpill);
+    g.fillPath(cachedCenterBayPath);
+
+    const float redTopY = static_cast<float>(havenSlot.getY()) + 16.0f;
+    juce::ColourGradient topRedGlint(EngineeredDepthTheme::Colors::red.withAlpha(0.08f + 0.08f * dirtLevel),
+                                     havenCentre.x, redTopY,
+                                     juce::Colours::transparentBlack,
+                                     havenCentre.x + spillR * 0.45f, redTopY,
+                                     true);
+    g.setGradientFill(topRedGlint);
+    g.fillPath(cachedCenterBayPath);
+
+    if (knobs[2] != nullptr && !knobs[2]->getDialBounds().isEmpty())
+    {
+        const auto dialLocal = knobs[2]->getDialBounds();
+        const float cx = static_cast<float>(knobs[2]->getX()) + dialLocal.getCentreX();
+        const float cy = static_cast<float>(knobs[2]->getY()) + dialLocal.getCentreY();
+        const float haloR = dialLocal.getWidth() * 0.56f;
+
+        juce::ColourGradient seatShadow(EngineeredDepthTheme::Colors::black.withAlpha(0.72f), cx, cy,
+                                        juce::Colours::transparentBlack, cx + haloR, cy, true);
+        g.setGradientFill(seatShadow);
+        g.fillEllipse(cx - haloR, cy - haloR, haloR * 2.0f, haloR * 2.0f);
+    }
+
+    g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.80f));
+    g.strokePath(cachedCenterWallsPath, juce::PathStrokeType(2.2f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
+
+    const auto centerSeamCol = EngineeredDepthTheme::Colors::metalRimLight
+                                   .interpolatedWith(EngineeredDepthTheme::Colors::red, 0.10f + 0.24f * dirtLevel);
+    juce::ColourGradient seamGrad(centerSeamCol.withAlpha(0.44f * 0.65f), 0.0f, yTop,
+                                  centerSeamCol.withAlpha(0.44f * 0.28f), 0.0f, yBot, false);
+    seamGrad.addColour(0.45, centerSeamCol.withAlpha(0.44f));
+    g.setGradientFill(seamGrad);
+    g.strokePath(cachedCenterWallsPath, juce::PathStrokeType(1.15f, juce::PathStrokeType::mitered, juce::PathStrokeType::butt));
+}
+
+size_t PrimaryKnobsPanel::getEstimatedCacheBytes() const noexcept
+{
+    size_t total = cachedStaticChassisImage.isValid()
+        ? static_cast<size_t>(cachedStaticChassisImage.getWidth()) * static_cast<size_t>(cachedStaticChassisImage.getHeight()) * 4u
+        : 0u;
+    for (const auto& k : knobs)
+        if (k != nullptr)
+            total += k->getEstimatedCacheBytes();
+    total += outputMeter.getEstimatedCacheBytes();
+    return total;
+}
+
 void PrimaryKnobsPanel::paint(juce::Graphics& g)
 {
     if (chassisBounds.isEmpty() || getWidth() <= 0 || getHeight() <= 0)
@@ -402,27 +448,27 @@ void PrimaryKnobsPanel::paint(juce::Graphics& g)
     const int w = getWidth();
     const int h = getHeight();
 
-    if (!cachedChassisImage.isValid()
+    if (!cachedStaticChassisImage.isValid()
         || cachedW != w
         || cachedH != h
-        || std::abs(scale - cachedScale) > 0.01f
-        || std::abs(dirtLevel - cachedDirtLevel) > 0.01f)
+        || std::abs(scale - cachedScale) > 0.01f)
     {
         const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
         const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
-        cachedChassisImage = juce::Image(juce::Image::ARGB, rw, rh, true);
+        cachedStaticChassisImage = juce::Image(juce::Image::ARGB, rw, rh, true);
 
-        juce::Graphics cacheG(cachedChassisImage);
+        juce::Graphics cacheG(cachedStaticChassisImage);
         cacheG.addTransform(juce::AffineTransform::scale(scale));
-        renderChassisToCache(cacheG, dirtLevel);
+        renderStaticChassisToCache(cacheG);
 
         cachedW = w;
         cachedH = h;
         cachedScale = scale;
-        cachedDirtLevel = dirtLevel;
     }
 
-    g.drawImage(cachedChassisImage, 0, 0, w, h, 0, 0, cachedChassisImage.getWidth(), cachedChassisImage.getHeight());
+    g.drawImage(cachedStaticChassisImage, 0, 0, w, h,
+                0, 0, cachedStaticChassisImage.getWidth(), cachedStaticChassisImage.getHeight());
+    renderDynamicHavenGlow(g, dirtLevel);
 }
 
 } // namespace AllyGUI

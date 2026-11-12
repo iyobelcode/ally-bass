@@ -47,6 +47,7 @@ public:
     juce::Rectangle<float> getPillBounds() const noexcept { return pillBounds; }
     juce::Rectangle<float> getDialBounds() const noexcept { return dialBounds; }
     juce::Rectangle<float> getReadoutBounds() const noexcept { return readoutBounds; }
+    size_t getEstimatedCacheBytes() const noexcept { return lookAndFeel.getEstimatedCacheBytes(); }
 
 private:
     class DialSlider final : public juce::Slider

@@ -86,6 +86,12 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    size_t getEstimatedCacheBytes() const noexcept
+    {
+        return cachedStaticHeader.isValid()
+            ? static_cast<size_t>(cachedStaticHeader.getWidth()) * static_cast<size_t>(cachedStaticHeader.getHeight()) * 4u
+            : 0u;
+    }
 
 private:
     class PresetMenuLookAndFeel final : public juce::LookAndFeel_V4

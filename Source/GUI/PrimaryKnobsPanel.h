@@ -35,24 +35,28 @@ public:
     OutputLevelMeter* getOutputMeter() noexcept { return &outputMeter; }
     const OutputLevelMeter* getOutputMeter() const noexcept { return &outputMeter; }
     juce::Rectangle<float> getChassisBounds() const noexcept { return chassisBounds; }
+    size_t getEstimatedCacheBytes() const noexcept;
 
 private:
     void parameterChanged(const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override;
-    void renderChassisToCache(juce::Graphics& g, float dirtLevel) const;
+    void renderStaticChassisToCache(juce::Graphics& g) const;
+    void renderDynamicHavenGlow(juce::Graphics& g, float dirtLevel) const;
 
     juce::AudioProcessorValueTreeState& apvtsRef;
     std::array<std::unique_ptr<DepthRingKnob>, knobCount> knobs;
     std::array<juce::Rectangle<int>, knobCount> slotBounds;
     OutputLevelMeter outputMeter;
     juce::Rectangle<float> chassisBounds;
+    juce::Path cachedCenterBayPath;
+    juce::Path cachedCenterWallsPath;
+    juce::Rectangle<int> centerRepaintBounds;
     std::atomic<float> havenDirtNormalized { 0.15f };
 
-    mutable juce::Image cachedChassisImage;
+    mutable juce::Image cachedStaticChassisImage;
     mutable int cachedW = 0;
     mutable int cachedH = 0;
     mutable float cachedScale = 0.0f;
-    mutable float cachedDirtLevel = -1.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PrimaryKnobsPanel)
 };

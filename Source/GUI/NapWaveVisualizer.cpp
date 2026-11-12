@@ -272,9 +272,15 @@ void NapWaveVisualizer::rebuildStaticLayers()
     cachedContoursSecondary.clear();
     cachedGridLines.clear();
     cachedDatumLine.clear();
+    cachedPlotClipPath.clear();
+    cachedW = 0;
+    cachedH = 0;
 
     if (plotBounds.isEmpty())
         return;
+
+    const float plotRadius = juce::jlimit(4.0f, 7.0f, plotBounds.getHeight() * 0.055f);
+    cachedPlotClipPath.addRoundedRectangle(plotBounds, plotRadius);
 
     const float px = plotBounds.getX();
     const float py = plotBounds.getY();
@@ -339,11 +345,8 @@ void NapWaveVisualizer::rebuildStaticLayers()
     }
 }
 
-void NapWaveVisualizer::paint(juce::Graphics& g)
+void NapWaveVisualizer::renderStaticBackground(juce::Graphics& g) const
 {
-    if (panelBounds.isEmpty() || plotBounds.isEmpty())
-        return;
-
     const float radius = juce::jlimit(8.0f, 12.0f, panelBounds.getHeight() * 0.085f);
 
     // 1. Engineered Depth Metallic Frame & Deep Abyssal Scope Housing
@@ -475,14 +478,10 @@ void NapWaveVisualizer::paint(juce::Graphics& g)
                    juce::Justification::centredRight, false);
     }
 
-    // 4. Seamless Plot Viewport + Clipped Static Layers + Optical Cyan Waveform
-    // (No nested box border around plotBounds — screen extends cohesively like master)
+    // 4a. Clipped Static Plot Layers (Bathymetric Contours, Blueprint Grid, Dashed NAP Datum)
     {
         juce::Graphics::ScopedSaveState save(g);
-        const float plotRadius = juce::jlimit(4.0f, 7.0f, plotBounds.getHeight() * 0.055f);
-        juce::Path clipRectPath;
-        clipRectPath.addRoundedRectangle(plotBounds, plotRadius);
-        g.reduceClipRegion(clipRectPath);
+        g.reduceClipRegion(cachedPlotClipPath);
 
         // Layer A: Topographic NAP bathymetric contours fading subtly in submerged half
         g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.11f));
@@ -498,6 +497,44 @@ void NapWaveVisualizer::paint(juce::Graphics& g)
         // Layer C: Dashed -4.5 m NAP reference baseline
         g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.52f));
         g.fillPath(cachedDatumLine);
+    }
+}
+
+void NapWaveVisualizer::paint(juce::Graphics& g)
+{
+    if (panelBounds.isEmpty() || plotBounds.isEmpty())
+        return;
+
+    const int w = getWidth();
+    const int h = getHeight();
+    const float scale = juce::jmax(1.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+
+    if (!cachedStaticBackground.isValid()
+        || cachedW != w
+        || cachedH != h
+        || std::abs(cachedScale - scale) > 0.01f
+        || cachedMonoLock != monoLockState)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedStaticBackground = juce::Image(juce::Image::ARGB, rw, rh, true);
+        juce::Graphics cacheG(cachedStaticBackground);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        renderStaticBackground(cacheG);
+        cachedW = w;
+        cachedH = h;
+        cachedScale = scale;
+        cachedMonoLock = monoLockState;
+    }
+
+    g.drawImage(cachedStaticBackground,
+                0, 0, w, h,
+                0, 0, cachedStaticBackground.getWidth(), cachedStaticBackground.getHeight());
+
+    // 4b. Clipped Dynamic Optical Cyan Waveform (or resting datum trace)
+    {
+        juce::Graphics::ScopedSaveState save(g);
+        g.reduceClipRegion(cachedPlotClipPath);
 
         // Layer D: Live Post-Output Audio Waveform Trace (or calm flat datum line on silence)
         // 0 dBFS (+/-1.0) maps cleanly to -3.0 m / -6.0 m grid lines (+/- 2/6 H), leaving headroom for overdrive!

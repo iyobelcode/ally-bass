@@ -53,12 +53,19 @@ public:
     juce::String getDisplayedMonoStatusText(bool compact = false) const;
 
     const std::array<float, displayPointCount>& getDisplayWaveform() const noexcept { return displayWaveform; }
+    size_t getEstimatedCacheBytes() const noexcept
+    {
+        return cachedStaticBackground.isValid()
+            ? static_cast<size_t>(cachedStaticBackground.getWidth()) * static_cast<size_t>(cachedStaticBackground.getHeight()) * 4u
+            : 0u;
+    }
 
 private:
     static constexpr float silenceThreshold = 0.0012f;
 
     void timerCallback() override;
     void rebuildStaticLayers();
+    void renderStaticBackground(juce::Graphics& g) const;
 
     AllyBassAudioProcessor& processor;
 
@@ -69,8 +76,15 @@ private:
     juce::Path cachedContoursSecondary;
     juce::Path cachedGridLines;
     juce::Path cachedDatumLine;
+    juce::Path cachedPlotClipPath;
     juce::Path waveStrokePath;
     juce::Path waveFillPath;
+
+    mutable juce::Image cachedStaticBackground;
+    mutable int   cachedW = 0;
+    mutable int   cachedH = 0;
+    mutable float cachedScale = 0.0f;
+    mutable bool  cachedMonoLock = true;
 
     juce::Rectangle<float> panelBounds;
     juce::Rectangle<float> headerBounds;

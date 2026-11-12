@@ -56,6 +56,18 @@ juce::Rectangle<float> EngineeredDepthToggle::getLedBounds() const noexcept
                                                        static_cast<float>(button.getY()));
 }
 
+size_t EngineeredDepthToggle::getEstimatedCacheBytes() const noexcept
+{
+    return button.getEstimatedCacheBytes();
+}
+
+size_t EngineeredDepthToggle::HardwareButton::getEstimatedCacheBytes() const noexcept
+{
+    return cachedButtonImage.isValid()
+        ? static_cast<size_t>(cachedButtonImage.getWidth()) * static_cast<size_t>(cachedButtonImage.getHeight()) * 4u
+        : 0u;
+}
+
 juce::Rectangle<float> EngineeredDepthToggle::HardwareButton::computeCapsuleBounds() const noexcept
 {
     return getLocalBounds().toFloat().reduced(1.5f);
@@ -73,6 +85,54 @@ juce::Rectangle<float> EngineeredDepthToggle::HardwareButton::computeLedBounds(j
 void EngineeredDepthToggle::HardwareButton::paintButton(juce::Graphics& g,
                                                         bool shouldDrawButtonAsHighlighted,
                                                         bool shouldDrawButtonAsDown)
+{
+    const auto capsule = computeCapsuleBounds();
+    if (capsule.isEmpty() || getWidth() <= 0 || getHeight() <= 0)
+        return;
+
+    const bool enabled = isEnabled();
+    const bool isOn    = getToggleState();
+    const bool hovered = enabled && shouldDrawButtonAsHighlighted;
+    const bool down    = enabled && shouldDrawButtonAsDown;
+    const bool focused = enabled && hasKeyboardFocus(true);
+
+    const uint8_t stateMask = static_cast<uint8_t>(
+        (enabled ? 1u : 0u)
+        | (isOn ? 2u : 0u)
+        | (hovered ? 4u : 0u)
+        | (down ? 8u : 0u)
+        | (focused ? 16u : 0u));
+
+    const float scale = juce::jlimit(1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const int w = getWidth();
+    const int h = getHeight();
+
+    if (!cachedButtonImage.isValid()
+        || cachedW != w
+        || cachedH != h
+        || std::abs(scale - cachedScale) > 0.01f
+        || cachedStateMask != stateMask)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedButtonImage = juce::Image(juce::Image::ARGB, rw, rh, true);
+
+        juce::Graphics cacheG(cachedButtonImage);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        renderButtonToCache(cacheG, hovered, down);
+
+        cachedW = w;
+        cachedH = h;
+        cachedScale = scale;
+        cachedStateMask = stateMask;
+    }
+
+    g.drawImage(cachedButtonImage, 0, 0, w, h, 0, 0, cachedButtonImage.getWidth(), cachedButtonImage.getHeight());
+}
+
+void EngineeredDepthToggle::HardwareButton::renderButtonToCache(juce::Graphics& g,
+                                                                bool shouldDrawButtonAsHighlighted,
+                                                                bool shouldDrawButtonAsDown) const
 {
     const auto capsule = computeCapsuleBounds();
     if (capsule.isEmpty())

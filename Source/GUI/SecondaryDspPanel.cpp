@@ -122,13 +122,13 @@ void SecondaryDspPanel::resized()
 
     // 4. 1300 MONO LOCK toggle
     monoLockToggle->setBounds(juce::roundToInt(cursorX), rowY, monoW, rowH);
+
+    cachedW = 0;
+    cachedH = 0;
 }
 
-void SecondaryDspPanel::paint(juce::Graphics& g)
+void SecondaryDspPanel::renderPanelToCache(juce::Graphics& g) const
 {
-    if (chassisBounds.isEmpty())
-        return;
-
     const float chamfer = juce::jlimit(6.0f, 11.0f, chassisBounds.getHeight() * 0.145f);
     const auto outerPath  = EngineeredDepthTheme::buildChamferedRectPath(chassisBounds, chamfer, chamfer);
     const auto innerBevel = EngineeredDepthTheme::buildChamferedRectPath(chassisBounds.reduced(1.5f),
@@ -204,6 +204,48 @@ void SecondaryDspPanel::paint(juce::Graphics& g)
         g.setGradientFill(divGrad);
         g.drawLine(x, divTop, x, divBot, 1.15f);
     }
+}
+
+size_t SecondaryDspPanel::getEstimatedCacheBytes() const noexcept
+{
+    size_t total = cachedPanelImage.isValid()
+        ? static_cast<size_t>(cachedPanelImage.getWidth()) * static_cast<size_t>(cachedPanelImage.getHeight()) * 4u
+        : 0u;
+    if (attackKnob != nullptr)      total += attackKnob->getEstimatedCacheBytes();
+    if (releaseKnob != nullptr)     total += releaseKnob->getEstimatedCacheBytes();
+    if (overdriveToggle != nullptr) total += overdriveToggle->getEstimatedCacheBytes();
+    if (monoLockToggle != nullptr)  total += monoLockToggle->getEstimatedCacheBytes();
+    return total;
+}
+
+void SecondaryDspPanel::paint(juce::Graphics& g)
+{
+    if (chassisBounds.isEmpty() || getWidth() <= 0 || getHeight() <= 0)
+        return;
+
+    const float scale = juce::jlimit(1.0f, 4.0f, g.getInternalContext().getPhysicalPixelScaleFactor());
+    const int w = getWidth();
+    const int h = getHeight();
+
+    if (!cachedPanelImage.isValid()
+        || cachedW != w
+        || cachedH != h
+        || std::abs(scale - cachedScale) > 0.01f)
+    {
+        const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(w) * scale));
+        const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(h) * scale));
+        cachedPanelImage = juce::Image(juce::Image::ARGB, rw, rh, true);
+
+        juce::Graphics cacheG(cachedPanelImage);
+        cacheG.addTransform(juce::AffineTransform::scale(scale));
+        renderPanelToCache(cacheG);
+
+        cachedW = w;
+        cachedH = h;
+        cachedScale = scale;
+    }
+
+    g.drawImage(cachedPanelImage, 0, 0, w, h, 0, 0, cachedPanelImage.getWidth(), cachedPanelImage.getHeight());
 }
 
 } // namespace AllyGUI

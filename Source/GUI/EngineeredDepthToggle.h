@@ -36,6 +36,7 @@ public:
 
     juce::Rectangle<float> getCapsuleBounds() const noexcept;
     juce::Rectangle<float> getLedBounds() const noexcept;
+    size_t getEstimatedCacheBytes() const noexcept;
 
 private:
     class HardwareButton final : public juce::ToggleButton
@@ -49,9 +50,17 @@ private:
 
         juce::Rectangle<float> computeCapsuleBounds() const noexcept;
         juce::Rectangle<float> computeLedBounds(juce::Rectangle<float> capsule) const noexcept;
+        size_t getEstimatedCacheBytes() const noexcept;
 
     private:
+        void renderButtonToCache(juce::Graphics& g, bool hovered, bool down) const;
+
         ToggleConfig config;
+        mutable juce::Image cachedButtonImage;
+        mutable int cachedW = 0;
+        mutable int cachedH = 0;
+        mutable float cachedScale = 0.0f;
+        mutable uint8_t cachedStateMask = 0xffu;
     };
 
     HardwareButton button;

@@ -24,8 +24,20 @@ public:
     explicit EngineeredDepthKeyboard(juce::MidiKeyboardState& state);
     ~EngineeredDepthKeyboard() override = default;
 
+    void paint(juce::Graphics& g) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent& e) override;
+    void mouseMove(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
+    void mouseEnter(const juce::MouseEvent& e) override;
+    void mouseExit(const juce::MouseEvent& e) override;
+
+    size_t getEstimatedCacheBytes() const noexcept
+    {
+        return cachedKeyboardImage.isValid()
+            ? static_cast<size_t>(cachedKeyboardImage.getWidth()) * static_cast<size_t>(cachedKeyboardImage.getHeight()) * 4u
+            : 0u;
+    }
 
 protected:
     void drawWhiteNote(int midiNoteNumber,
@@ -46,6 +58,19 @@ protected:
     void drawUpDownButton(juce::Graphics&, int, int, bool, bool, bool) override {}
 
 private:
+    void updateHoverNote(juce::Point<float> pos) noexcept;
+
+    juce::MidiKeyboardState& keyboardStateRef;
+    int currentHoverNote = -1;
+    mutable juce::Image cachedKeyboardImage;
+    mutable int      cachedW = 0;
+    mutable int      cachedH = 0;
+    mutable float    cachedScale = 0.0f;
+    mutable int      cachedRangeStart = -1;
+    mutable int      cachedRangeEnd   = -1;
+    mutable uint64_t cachedDownMask   = 0;
+    mutable int      cachedHoverNote  = -1;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EngineeredDepthKeyboard)
 };
 
@@ -65,6 +90,14 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    size_t getEstimatedCacheBytes() const noexcept
+    {
+        size_t bytes = cachedChassisImage.isValid()
+            ? static_cast<size_t>(cachedChassisImage.getWidth()) * static_cast<size_t>(cachedChassisImage.getHeight()) * 4u
+            : 0u;
+        bytes += keyboard.getEstimatedCacheBytes();
+        return bytes;
+    }
 
     std::function<void(int delta)> onOctaveStepRequested;
 
@@ -93,6 +126,7 @@ private:
     };
 
     void timerCallback() override;
+    void renderChassisToCache(juce::Graphics& g) const;
 
     AllyBassAudioProcessor* processor = nullptr;
     uint64_t lastExternalMidiVersion = 0;
@@ -108,6 +142,11 @@ private:
     juce::Rectangle<int>   keyboardBedBounds;
     juce::Rectangle<float> octaveReadoutBounds;
     float dividerX = 0.0f;
+
+    mutable juce::Image cachedChassisImage;
+    mutable int   cachedChassisW = 0;
+    mutable int   cachedChassisH = 0;
+    mutable float cachedChassisScale = 0.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KeyboardPanel)
 };
