@@ -1,4 +1,4 @@
-# ALLY BASS – Windows Build & Installer Guide
+# ALLY - 1300 SUB SYNTH – Windows Build & Installer Guide
 
 > **JUICED UNICORN / IZHIA ARTS / 42GRAM**  
 > Almere, Nederland · 1300 / 036 · -4.5m NAP
@@ -17,7 +17,7 @@ git push -u origin main
 
 ### Stap 2 – GitHub Actions draait automatisch
 
-Na elke push naar `main` start de workflow **"Build ALLY BASS – Windows VST3 Installer"** die:
+Na elke push naar `main` start de workflow **"Build ALLY - 1300 SUB SYNTH – Windows VST3 Installer"** die:
 
 1. Controleert de code uit op een Windows Server 2022 runner
 2. Bouwt met CMake + Visual Studio 2022 (MSVC) in Release mode
@@ -27,7 +27,7 @@ Na elke push naar `main` start de workflow **"Build ALLY BASS – Windows VST3 I
 ### Stap 3 – Download de installer
 
 - Ga naar **GitHub → jouw repo → Actions → meest recente run → Artifacts**
-- Download **ALLY-BASS-Windows-Installer**
+- Download **ALLY-1300-SUB-SYNTH-Windows-Installer**
 - Pak uit en voer `AllyBass_Setup.exe` uit op Windows
 
 ### Stap 4 – Installatie op Windows
@@ -35,10 +35,10 @@ Na elke push naar `main` start de workflow **"Build ALLY BASS – Windows VST3 I
 - Voer `AllyBass_Setup.exe` uit als Administrator
 - De VST3 wordt geïnstalleerd naar:
   ```
-  C:\Program Files\Common Files\VST3\ALLY BASS.vst3\
+  C:\Program Files\Common Files\VST3\ALLY - 1300 SUB SYNTH.vst3\
   ```
 - Open je DAW (FL Studio, Ableton Live, Reaper, etc.) en voer een **plugin rescan** uit
-- ALLY BASS verschijnt in je instrument browser
+- ALLY - 1300 SUB SYNTH verschijnt in je instrument browser
 
 ---
 
@@ -68,7 +68,7 @@ cmake --build build --config Release --parallel
 
 De VST3 bundle staat dan op:
 ```
-build\AllyBass_artefacts\Release\VST3\ALLY BASS.vst3
+build\AllyBass_artefacts\Release\VST3\ALLY - 1300 SUB SYNTH.vst3
 ```
 
 Kopieer die map handmatig naar:
@@ -79,7 +79,7 @@ C:\Program Files\Common Files\VST3\
 ### Installer bouwen (optioneel)
 
 1. Installeer [Inno Setup 6](https://jrsoftware.org/isinfo.php)
-2. Kopieer de VST3 bundle naar `installer\staging\VST3\ALLY BASS.vst3\`
+2. Kopieer de VST3 bundle naar `installer\staging\ALLY - 1300 SUB SYNTH.vst3\`
 3. Open `installer\AllyBass-Windows.iss` in Inno Setup
 4. Druk op **Build → Compile** (of `Ctrl+F9`)
 5. De installer staat in `installer\Output\AllyBass_Setup.exe`
@@ -121,8 +121,7 @@ ALLY-Bassline/
 ├── installer/
 │   ├── AllyBass-Windows.iss    ← Inno Setup script
 │   └── staging/                ← wordt automatisch gevuld door CI
-│       └── VST3/
-│           └── ALLY BASS.vst3/
+│       └── ALLY - 1300 SUB SYNTH.vst3/
 ├── Source/                     ← C++ broncode
 ├── JUCE/                       ← JUCE 8.0.4
 ├── CMakeLists.txt

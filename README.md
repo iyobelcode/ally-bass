@@ -1,4 +1,4 @@
-# ALLY BASS — VST3 / AU / Standalone Bassline Synthesizer
+# ALLY - 1300 SUB SYNTH — VST3 / AU / Standalone Bassline Synthesizer
 
 > *"Minder knoppen, meer identiteit."*  
 > Gebouwd op de zeebodem (-4,5 meter onder NAP), geïnspireerd door polderklei, brutalistische architectuur, het Weerwater en de rauwe hiphop/drill cultuur van Almere (1300 / 036).
@@ -62,21 +62,24 @@ $$y = \sin\left(x_{\text{boosted}} \cdot (1.0 + 4.5 \cdot \text{drive}) \cdot \f
 
 ### 5. Master Switches
 * **036 OVERDRIVE**: Parallelle compressie (snelle 5ms attack, 80ms release, ratio 6:1) + 6dB extra saturation push voor onmiddellijk club-volume.
-* **1300 MONO LOCK**: 2e orde Linkwitz-Riley crossover op 90 Hz die alle subfrequenties dwingt naar hard mono en fase-annulering in clubs elimineert.
+* **1300 MONO LOCK**: Fase-consistente Mid/Side sub-bass mono lock op 90 Hz: behoudt het Mid-signaal (L+R)/2 bit-identiek zonder fase- of magnitude-vervorming, terwijl uitsluitend het Side-signaal (L-R)/2 wordt gefilterd met een vierde-orde hoogdoorlaatfilter (24 dB/oct via twee gecascadeerde 2e-orde Butterworth-trappen) met een klikvrije 8 ms crossfade.
 
 ---
 
-## 🎚️ De Interface (6 Knoppen & 2 Toggles)
+## 🎚️ De Interface (Engineered Depth Console)
+
+De interface is opgebouwd volgens het Engineered Depth-design: een robuust chassis met 5 primaire Depth Rings, secundaire DSP-knoppen en hardware toggles.
 
 1. **DIEPTE** (`diepte`): Regelt het sub-laag en het sub-resonantiepunt (-4.5m NAP focus).
 2. **POLDER PUNCH** (`polderPunch`): Bepaalt de transient knock en snap in de mix.
-3. **VERVAL** (`verval`): Vormt de staart van de 808 (van 0.05s boombap punch tot 5.0s doordreunende drill sustain).
-4. **HAVEN DIRT** (`havenDirt`): Stuurt de geselecteerde stadsdeel-saturatie aan.
-5. **WATERWIJK GLIDE** (`waterwijkGlide`): Bepaalt de glijtijd en legato slide respons (0 tot 500 ms).
-   *(Testfase-notitie: directe hernoeming vanaf oude ID `weerwaterGlide` zonder legacy-migratie; oude test-DAW-projecten/automations met `weerwaterGlide` verliezen de oude glide-binding en vallen terug op 40.0 ms.)*
-6. **STADSDEEL SELECTOR**: 4-standen selector (*Haven 1350*, *Centrum 1315*, *Poort 1363*, *Buiten 1330*).
-* **036 OVERDRIVE**: Parallel NYC compression + 6dB saturation boost (Toggle).
-* **1300 MONO LOCK**: Sub < 90Hz hard mono crossover (Toggle).
+3. **HAVEN DIRT** (`havenDirt`): Stuurt de geselecteerde stadsdeel-saturatie aan.
+4. **WATERWIJK GLIDE** (`waterwijkGlide`): Bepaalt de glijtijd en legato slide respons (0 tot 500 ms).
+5. **OUTPUT** (`masterVolume`): Hoofdvolumeregeling met analoge gain-staging.
+6. **ATTACK** (`attack`): Vormt de lineaire aanslagduur van de sub-bass (1.0 ms tot 300.0 ms).
+7. **RELEASE** (`release`): Bepaalt de uitklinktijd (10.0 ms tot 3000.0 ms, ~1% / -40 dB verval).
+8. **STADSDEEL SELECTOR** (`stadsdeel`): 4-standen selector (*Haven 1350*, *Centrum 1315*, *Poort 1363*, *Buiten 1330*).
+* **036 OVERDRIVE** (`overdrive036`): Parallel NYC compression + 6dB saturation boost (Toggle).
+* **1300 MONO LOCK** (`monoLock1300`): Fase-consistente 90 Hz Mid/Side sub mono lock (Toggle).
 
 ---
 
@@ -96,11 +99,12 @@ $$y = \sin\left(x_{\text{boosted}} \cdot (1.0 + 4.5 \cdot \text{drive}) \cdot \f
 ---
 
 ## 📦 Installatie & Builds
-De plugin is gecompileerd voor macOS (Apple Silicon arm64 / universal):
+De plugin is gecompileerd voor macOS (Apple Silicon arm64 / universal) en Windows (x64):
 
-* **VST3**: `~/Library/Audio/Plug-Ins/VST3/ALLY BASS.vst3`
-* **AU (Audio Unit)**: `~/Library/Audio/Plug-Ins/Components/ALLY BASS.component`
-* **Standalone App**: `build/AllyBass_artefacts/Release/Standalone/ALLY BASS.app`
+* **VST3 (macOS)**: `build/AllyBass_artefacts/Release/VST3/ALLY - 1300 SUB SYNTH.vst3` (installatielocatie: `~/Library/Audio/Plug-Ins/VST3/ALLY - 1300 SUB SYNTH.vst3`)
+* **AU (Audio Unit)**: `build/AllyBass_artefacts/Release/AU/ALLY - 1300 SUB SYNTH.component` (installatielocatie: `~/Library/Audio/Plug-Ins/Components/ALLY - 1300 SUB SYNTH.component`)
+* **Standalone App**: `build/AllyBass_artefacts/Release/Standalone/ALLY - 1300 SUB SYNTH.app`
+* **Windows VST3 Installer**: `installer/Output/AllyBass_Setup.exe` (installeert naar `C:\Program Files\Common Files\VST3\ALLY - 1300 SUB SYNTH.vst3\`)
 
 ### Handmatig bouwen met CMake:
 ```bash

@@ -1,5 +1,5 @@
 ; ═══════════════════════════════════════════════════════════════════════════
-;  ALLY BASS – Windows VST3 Installer
+;  ALLY - 1300 SUB SYNTH – Windows VST3 Installer
 ;  Built with Inno Setup 6
 ;  Developer: JUICED UNICORN / IZHIA ARTS / 42GRAM
 ;  Theme: Almere, Nederland – 1300 / 036

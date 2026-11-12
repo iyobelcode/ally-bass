@@ -1,4 +1,4 @@
-name: Build ALLY BASS – Windows VST3 Installer
+name: Build ALLY - 1300 SUB SYNTH – Windows VST3 Installer
 
 on:
   push:
@@ -66,7 +66,7 @@ jobs:
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ALLY-BASS-Windows-Installer
+          name: ALLY-1300-SUB-SYNTH-Windows-Installer
           path: installer\Output\AllyBass_Setup.exe
           retention-days: 30
 
