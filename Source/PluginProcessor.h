@@ -94,6 +94,7 @@ public:
     uint64_t getExternalMidiVersion() const noexcept { return externalMidiVersion.load(std::memory_order_acquire); }
     void syncExternalMidiToKeyboardState(uint64_t& inOutLastVersion,
                                          std::array<uint64_t, 2>& inOutAppliedExternalMask);
+    void releaseGuiHeldKeysOnKeyboardState();
     uint64_t getGuiMidiQueueOverflowCount() const noexcept { return guiQueueOverflowCount.load(std::memory_order_acquire); }
 
     // Read-only DSP Envelope inspection accessors (D.1B/D.1C single-sample Attack verification)
@@ -129,13 +130,17 @@ private:
 
     juce::MidiKeyboardState keyboardState;
 
-    // Lock-free SPSC GUI -> Audio MIDI queue + authoritative 128-note atomic reconciliation bitmask
+    // Lock-free SPSC GUI -> Audio MIDI queue + authoritative 128-note atomic reconciliation bitmask & velocity mirror
     std::array<GuiMidiEvent, guiMidiQueueCapacity> guiToAudioMidiQueue {};
     std::atomic<uint32_t> guiMidiWriteIdx { 0 };
     std::atomic<uint32_t> guiMidiReadIdx { 0 };
     std::array<std::atomic<uint64_t>, 2> guiDesiredNotesMask {};
+    std::array<std::atomic<float>, 128> guiDesiredVelocities {};
+    std::atomic<int> guiLastPressedNote { -1 };
     std::atomic<bool> guiMidiOverflowPending { false };
     std::atomic<uint64_t> guiQueueOverflowCount { 0 };
+    static_assert(std::atomic<float>::is_always_lock_free, "guiDesiredVelocities requires lock-free float");
+    static_assert(std::atomic<int>::is_always_lock_free, "guiLastPressedNote requires lock-free int");
     bool suppressGuiMidiForwarding = false;
 
     // Audio-thread private GUI held-note tracking + lock-free Audio -> GUI DAW MIDI mirror
@@ -201,6 +206,7 @@ private:
     std::atomic<uint64_t> outputMeterCounter { 0 };
 
     void handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount);
+    void reconcileGuiOverflowNotes(float attackMs, float punchAmount);
     void updateEnvelopeRates(float attackMs, float releaseMs);
     void publishScopeHistoryToTripleBuffer() noexcept;
     OutputMeterMetrics pullLatestMeterBlock() const noexcept;

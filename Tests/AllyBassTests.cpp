@@ -31,6 +31,9 @@
 namespace
 {
 
+// Controlled via CLI `--mode` (default `all` preserves every assertion & timing budget).
+bool gEnforceWallClockRenderBudgets = true;
+
 juce::Slider* findSliderByName(juce::Component& root, const juce::String& name)
 {
     if (auto* slider = dynamic_cast<juce::Slider*>(&root))
@@ -1596,10 +1599,12 @@ public:
                 setParamPlainValue(proc.apvts, "attack", 1.0f);
                 setParamPlainValue(proc.apvts, "masterVolume", 0.0f);
 
+                std::atomic<bool> consumerReady { false };
                 std::atomic<bool> stop { false };
                 std::atomic<int> tornFrames { 0 };
                 std::atomic<bool> sawNonFinite { false };
                 std::atomic<uint64_t> prevMeterCounter { 0 };
+                std::atomic<uint64_t> consumerReads { 0 };
                 std::atomic<bool> counterWentBackwards { false };
 
                 juce::AudioBuffer<float> buf(2, bs);
@@ -1612,6 +1617,7 @@ public:
                 std::thread consumer([&]()
                 {
                     std::array<float, 1536> snap {};
+                    consumerReady.store(true, std::memory_order_release);
                     while (!stop.load(std::memory_order_acquire))
                     {
                         proc.getVisualizerData(snap.data(), 1536);
@@ -1633,23 +1639,68 @@ public:
                         if (m.updateCounter < prev)
                             counterWentBackwards.store(true, std::memory_order_relaxed);
                         prevMeterCounter.store(m.updateCounter, std::memory_order_relaxed);
+                        consumerReads.fetch_add(1, std::memory_order_release);
                     }
                 });
 
+                while (!consumerReady.load(std::memory_order_acquire))
+                    std::this_thread::yield();
+
                 const int numBlocks = (bs <= 256) ? 200 : 80;
-                for (int b = 0; b < numBlocks; ++b)
+                int executedBlocks = 0;
+                while (executedBlocks < numBlocks || consumerReads.load(std::memory_order_acquire) < 4)
                 {
                     buf.clear();
                     proc.processBlock(buf, midi);
+                    ++executedBlocks;
                 }
 
                 stop.store(true, std::memory_order_release);
                 consumer.join();
 
+                expect(consumerReads.load() >= 4, "Concurrent consumer thread must overlap with producer");
                 expectEquals(tornFrames.load(), 0);
                 expect(!sawNonFinite.load(), "Consumer must never observe NaN/Inf floats");
                 expect(!counterWentBackwards.load(), "Meter counter must remain monotonic");
-                expectEquals(static_cast<int>(proc.getVisualizerWriteCounter()), numBlocks + 1);
+                expectEquals(static_cast<int>(proc.getVisualizerWriteCounter()), executedBlocks + 1);
+            }
+
+            // Long GUI preemption simulation (>500 producer blocks cycling triple slots cleanly with 0 torn frames)
+            {
+                AllyBassAudioProcessor preemptProc;
+                preemptProc.setPlayConfigDetails(0, 2, 48000.0, 256);
+                preemptProc.prepareToPlay(48000.0, 256);
+                setParamPlainValue(preemptProc.apvts, "attack", 1.0f);
+                setParamPlainValue(preemptProc.apvts, "diepte", 0.0f);
+                setParamPlainValue(preemptProc.apvts, "havenDirt", 0.0f);
+
+                juce::AudioBuffer<float> pBuf(2, 256);
+                juce::MidiBuffer pMidi;
+                pMidi.addEvent(juce::MidiMessage::noteOn(1, 69, 1.0f), 0);
+                pBuf.clear();
+                preemptProc.processBlock(pBuf, pMidi);
+                pMidi.clear();
+
+                // Take an initial snapshot (claims consumer slot), then preempt consumer while producer wraps 600 blocks
+                std::array<float, 1536> snapA {};
+                preemptProc.getVisualizerData(snapA.data(), 1536);
+
+                for (int i = 0; i < 600; ++i)
+                {
+                    pBuf.clear();
+                    preemptProc.processBlock(pBuf, pMidi);
+                }
+
+                std::array<float, 1536> snapB {};
+                preemptProc.getVisualizerData(snapB.data(), 1536);
+                for (size_t i = 1; i < snapB.size(); ++i)
+                {
+                    expect(std::isfinite(snapB[i]), "Post-preemption scope sample must be finite");
+                    expect(std::abs(snapB[i] - snapB[i - 1]) <= 0.25f,
+                           "Post-preemption scope snapshot must stay phase-continuous without wrap tear");
+                }
+                const auto mAfter = preemptProc.consumeOutputMeterMetrics();
+                expectEquals(static_cast<int>(mAfter.updateCounter), 601);
             }
 
             // Editor open/close/reopen + sample-rate change during live audio processing
@@ -1805,6 +1856,243 @@ public:
 
             stop.store(true, std::memory_order_release);
             presetThread.join();
+        }
+
+        beginTest("D.1C.1 Overflow missing-NoteOn recovery, 0-sample host ping, releaseResources->prepareToPlay queue reset & DAW+GUI coexistence");
+        {
+            // Bug 1: Partial/full queue overflow dropping a STILL-HELD NoteOn must still trigger note + velocity via mask reconciliation
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+                proc.prepareToPlay(48000.0, 256);
+                setParamPlainValue(proc.apvts, "attack", 1.0f);
+                setParamPlainValue(proc.apvts, "release", 15.0f);
+                setParamPlainValue(proc.apvts, "waterwijkGlide", 0.0f);
+
+                // Fill queue past partial -> full capacity using alternating noteOn/noteOff that leaves everything released
+                for (int i = 0; i < 128; ++i)
+                {
+                    proc.getKeyboardState().noteOn(1, 36 + (i % 12), 0.3f);
+                    proc.getKeyboardState().noteOff(1, 36 + (i % 12), 0.0f);
+                }
+                // Now queue is full (256 events): this final held NoteOn (60, vel=0.80f) drops into overflow
+                proc.getKeyboardState().noteOn(1, 60, 0.80f);
+                expect(proc.getGuiMidiQueueOverflowCount() > 0, "Expected queue overflow before checking held NoteOn recovery");
+
+                juce::AudioBuffer<float> buf(2, 256);
+                juce::MidiBuffer midi;
+                buf.clear();
+                proc.processBlock(buf, midi);
+
+                expect(proc.getEnvelopeStateInt() != 0,
+                       "Held GUI NoteOn dropped during queue overflow must still trigger synth via bitmask reconciliation");
+                expect(bufferPeak(buf) > 0.01f, "Recovered overflow NoteOn must produce audible output");
+                const float expectedRecoveredVel = juce::MidiMessage::noteOn(1, 60, 0.80f).getFloatVelocity();
+                expectWithinAbsoluteError(proc.getCurrentVelocityGain(), expectedRecoveredVel, 1e-4f);
+
+                proc.getKeyboardState().noteOff(1, 60, 0.0f);
+                for (int b = 0; b < 30; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                }
+                expectEquals(proc.getEnvelopeStateInt(), 0);
+            }
+
+            // Bug 2: 0-sample host ping immediately after overflow must NOT discard guiMidiOverflowPending without reconciling
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+                proc.prepareToPlay(48000.0, 256);
+                setParamPlainValue(proc.apvts, "attack", 1.0f);
+                setParamPlainValue(proc.apvts, "release", 15.0f);
+
+                // Start note 36 and consume it cleanly in audio
+                proc.getKeyboardState().noteOn(1, 36, 0.9f);
+                juce::AudioBuffer<float> buf(2, 256);
+                juce::MidiBuffer midi;
+                buf.clear();
+                proc.processBlock(buf, midi);
+                expect(proc.getEnvelopeStateInt() != 0);
+
+                // Overflow queue with unrelated pulses, then release note 36 inside overflow
+                for (int i = 0; i < 140; ++i)
+                {
+                    proc.getKeyboardState().noteOn(1, 48 + (i % 12), 0.5f);
+                    proc.getKeyboardState().noteOff(1, 48 + (i % 12), 0.0f);
+                }
+                proc.getKeyboardState().noteOff(1, 36, 0.0f);
+
+                // Host sends 0-sample ping block BEFORE normal 256-sample blocks
+                juce::AudioBuffer<float> zeroBuf(2, 0);
+                proc.processBlock(zeroBuf, midi);
+
+                for (int b = 0; b < 30; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                }
+                expectEquals(proc.getEnvelopeStateInt(), 0); // Must NOT stick after 0-sample block
+            }
+
+            // Bug 3: Queued GUI NoteOn before releaseResources()->prepareToPlay() must NOT replay as phantom note
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+                proc.prepareToPlay(48000.0, 256);
+
+                proc.getKeyboardState().noteOn(1, 48, 0.9f); // Queued in guiToAudioMidiQueue before processBlock
+                proc.releaseResources();
+                proc.prepareToPlay(48000.0, 256);
+
+                juce::AudioBuffer<float> buf(2, 256);
+                juce::MidiBuffer midi;
+                buf.clear();
+                proc.processBlock(buf, midi);
+
+                expectEquals(proc.getEnvelopeStateInt(), 0);
+                expectWithinAbsoluteError(bufferPeak(buf), 0.0f, 1e-6f);
+            }
+
+            // Bug 4: Editor focusLost / octave change must release GUI/QWERTY keys WITHOUT silencing held External DAW MIDI
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+                proc.prepareToPlay(48000.0, 256);
+
+                std::unique_ptr<juce::AudioProcessorEditor> baseEd(proc.createEditor());
+                auto* ed = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEd.get());
+                expect(ed != nullptr);
+
+                if (ed != nullptr)
+                {
+                    juce::AudioBuffer<float> buf(2, 256);
+                    juce::MidiBuffer dawMidi;
+                    dawMidi.addEvent(juce::MidiMessage::noteOn(1, 41, 0.92f), 0);
+                    buf.clear();
+                    proc.processBlock(buf, dawMidi);
+                    dawMidi.clear();
+
+                    uint64_t extVer = 0;
+                    std::array<uint64_t, 2> extMask {};
+                    proc.syncExternalMidiToKeyboardState(extVer, extMask);
+                    expect(proc.getKeyboardState().isNoteOn(1, 41), "External DAW note must be visually active");
+
+                    // Also press GUI note 36, then trigger focusLost & octave step
+                    proc.getKeyboardState().noteOn(1, 36, 0.85f);
+                    ed->focusLost(juce::Component::focusChangedDirectly);
+                    ed->setCurrentOctaveSafe(3);
+
+                    for (int b = 0; b < 10; ++b)
+                    {
+                        buf.clear();
+                        proc.processBlock(buf, dawMidi);
+                    }
+
+                    expect(!proc.getKeyboardState().isNoteOn(1, 36), "GUI note 36 must be cleared on focusLost/octave change");
+                    expectEquals(proc.getEnvelopeStateInt(), 2); // DAW note 41 must stay in Sustain (not Release)
+                    expect(proc.getKeyboardState().isNoteOn(1, 41),
+                           "External DAW MIDI note 41 must stay lit after GUI focusLost / octave shift");
+
+                    // Simultaneous DAW MIDI (41) + GUI/Mouse (45) + QWERTY (48) legato + editor close/reopen re-sync
+                    proc.getKeyboardState().noteOn(1, 45, 0.90f);
+                    buf.clear();
+                    proc.processBlock(buf, dawMidi);
+                    expectEquals(proc.getEnvelopeStateInt(), 2);
+
+                    // Close & reopen editor while DAW note 41 stays held
+                    baseEd.reset();
+                    std::unique_ptr<juce::AudioProcessorEditor> reopenedEd(proc.createEditor());
+                    expect(reopenedEd != nullptr);
+                    buf.clear();
+                    proc.processBlock(buf, dawMidi);
+                    proc.getKeyboardState().noteOff(1, 45, 0.0f);
+                    dawMidi.addEvent(juce::MidiMessage::noteOff(1, 41), 0);
+                    setParamPlainValue(proc.apvts, "release", 15.0f);
+                    for (int b = 0; b < 30; ++b)
+                    {
+                        buf.clear();
+                        proc.processBlock(buf, dawMidi);
+                        dawMidi.clear();
+                    }
+                    expectEquals(proc.getEnvelopeStateInt(), 0);
+                }
+            }
+        }
+
+        beginTest("D.1C.1 Monophonic LIFO semantics, repeated NoteOn, overlapping velocities & queued preset swaps");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+            proc.prepareToPlay(48000.0, 256);
+            setParamPlainValue(proc.apvts, "attack", 1.0f);
+            setParamPlainValue(proc.apvts, "release", 20.0f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 0.0f);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.0f);
+
+            juce::AudioBuffer<float> buf(2, 256);
+            juce::MidiBuffer midi;
+
+            // 1. Overlapping notes with different velocities + LIFO stack return on release:
+            // Note 36 (vel 0.25) -> Note 48 (vel 0.90) -> release Note 48 -> returns to 36 (Sustain, NOT Idle/Release)
+            proc.getKeyboardState().noteOn(1, 36, 0.25f);
+            buf.clear();
+            proc.processBlock(buf, midi);
+            const float firstVelGain = proc.getCurrentVelocityGain();
+            expect(firstVelGain > 0.15f && firstVelGain < 0.35f, "Initial note velocity ~0.25 should apply");
+
+            proc.getKeyboardState().noteOn(1, 48, 0.90f);
+            // Trigger preset change WHILE queued NoteOn(48) waits for processBlock
+            proc.setCurrentProgram(1);
+            setParamPlainValue(proc.apvts, "attack", 1.0f);
+            setParamPlainValue(proc.apvts, "release", 20.0f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 0.0f);
+            buf.clear();
+            proc.processBlock(buf, midi);
+            expectEquals(proc.getEnvelopeStateInt(), 2); // Sustain (legato, no re-attack click)
+            expect(proc.getCurrentVelocityGain() > 0.70f, "Overlapping NoteOn(48, 0.90) updates velocity gain");
+
+            // Repeated NoteOn of SAME held pitch (48, vel 0.45) must not duplicate stack entries
+            proc.getKeyboardState().noteOn(1, 48, 0.45f);
+            buf.clear();
+            proc.processBlock(buf, midi);
+            expectEquals(proc.getEnvelopeStateInt(), 2);
+
+            // Release 48 -> must return to held 36 cleanly (still Sustain)
+            proc.getKeyboardState().noteOff(1, 48, 0.0f);
+            buf.clear();
+            proc.processBlock(buf, midi);
+            expectEquals(proc.getEnvelopeStateInt(), 2);
+
+            // Release 36 -> now must enter Release -> Idle
+            proc.getKeyboardState().noteOff(1, 36, 0.0f);
+            for (int b = 0; b < 30; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, midi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 0);
+
+            // 2. Partial queue overflow (~150 queued then 150 more with NoteOn followed by NoteOff inside overflow)
+            for (int i = 0; i < 75; ++i)
+            {
+                proc.getKeyboardState().noteOn(1, 36 + (i % 12), 0.7f);
+                proc.getKeyboardState().noteOff(1, 36 + (i % 12), 0.0f);
+            }
+            // Now 150 events queued (partially full). Burst 150 more: NoteOn(55) followed by NoteOff(55) across overflow boundary
+            for (int i = 0; i < 74; ++i)
+            {
+                proc.getKeyboardState().noteOn(1, 36 + (i % 12), 0.8f);
+                proc.getKeyboardState().noteOff(1, 36 + (i % 12), 0.0f);
+            }
+            proc.getKeyboardState().noteOn(1, 55, 0.95f);  // drops into overflow
+            proc.getKeyboardState().noteOff(1, 55, 0.0f);  // drops into overflow too
+            for (int b = 0; b < 30; ++b)
+            {
+                buf.clear();
+                proc.processBlock(buf, midi);
+            }
+            expectEquals(proc.getEnvelopeStateInt(), 0);
         }
     }
 };
@@ -2835,6 +3123,7 @@ public:
                 proc.setPlayConfigDetails(0, 2, sr, 256);
                 proc.prepareToPlay(sr, 256);
 
+                std::atomic<bool> consumerReady { false };
                 std::atomic<bool> stopFlag { false };
                 std::atomic<bool> consumerSawBadFloat { false };
                 std::atomic<uint64_t> consumerReads { 0 };
@@ -2842,6 +3131,7 @@ public:
                 std::thread consumer([&]()
                 {
                     std::array<float, 1536> localScope {};
+                    consumerReady.store(true, std::memory_order_release);
                     while (!stopFlag.load(std::memory_order_acquire))
                     {
                         proc.getVisualizerData(localScope.data(), 1536);
@@ -2853,14 +3143,19 @@ public:
                         const auto peeked = proc.peekOutputMeterMetrics();
                         if (!std::isfinite(peeked.peakLinear) || !std::isfinite(peeked.rmsLinear))
                             consumerSawBadFloat.store(true, std::memory_order_relaxed);
-                        consumerReads.fetch_add(1, std::memory_order_relaxed);
+                        consumerReads.fetch_add(1, std::memory_order_release);
                     }
                 });
 
+                while (!consumerReady.load(std::memory_order_acquire))
+                    std::this_thread::yield();
+
                 juce::AudioBuffer<float> audio(2, 256);
                 juce::MidiBuffer midi;
-                for (int b = 0; b < 120; ++b)
+                int blocksExecuted = 0;
+                while (blocksExecuted < 120 || consumerReads.load(std::memory_order_acquire) < 8)
                 {
+                    const int b = blocksExecuted;
                     midi.clear();
                     if (b == 2)
                         midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
@@ -2880,14 +3175,15 @@ public:
 
                     audio.clear();
                     proc.processBlock(audio, midi);
+                    ++blocksExecuted;
                 }
 
                 stopFlag.store(true, std::memory_order_release);
                 consumer.join();
 
                 expect(!consumerSawBadFloat.load(), "Concurrent consumer must never observe NaN, Inf, or torn values");
-                expect(consumerReads.load() > 0, "Concurrent consumer thread must execute reads");
-                expectEquals(static_cast<int>(proc.getVisualizerWriteCounter()), 120);
+                expect(consumerReads.load() >= 8, "Concurrent consumer thread must execute reads");
+                expectEquals(static_cast<int>(proc.getVisualizerWriteCounter()), blocksExecuted);
                 expectWithinAbsoluteError(static_cast<float>(proc.getCurrentSampleRate()),
                                           static_cast<float>(sr), 0.1f);
             }
@@ -3165,10 +3461,13 @@ public:
                     }
                     const double elapsedMs = juce::Time::getMillisecondCounterHiRes() - t0;
                     const double avgMsPerFrame = elapsedMs / 60.0;
-                    logMessage("Scope + OutputLevelMeter 1x software render avg: "
+                    logMessage("[PERFORMANCE-BENCHMARK] Scope + OutputLevelMeter 1x software render avg: "
                                + juce::String(avgMsPerFrame, 3) + " ms/frame");
-                    expect(avgMsPerFrame < 15.0,
-                           "Average software render time for Scope + OutputMeter must remain smooth under 15 ms/frame");
+                    if (gEnforceWallClockRenderBudgets)
+                    {
+                        expect(avgMsPerFrame < 15.0,
+                               "Average software render time for Scope + OutputMeter must remain smooth under 15 ms/frame");
+                    }
                 }
             }
         }
@@ -3278,8 +3577,9 @@ public:
                 for (int frame = 0; frame < 30; ++frame)
                     (void) renderAtScale(*ed, 1.0f);
                 const double avgMs = (juce::Time::getMillisecondCounterHiRes() - t0) / 30.0;
-                logMessage("Full editor (780x580) 1x software render avg: " + juce::String(avgMs, 3) + " ms/frame");
-                expect(avgMs < 25.0, "Full Engineered Depth editor paint must stay responsive under 25 ms/frame");
+                logMessage("[PERFORMANCE-BENCHMARK] Full editor (780x580) 1x software render avg: " + juce::String(avgMs, 3) + " ms/frame");
+                if (gEnforceWallClockRenderBudgets)
+                    expect(avgMs < 25.0, "Full Engineered Depth editor paint must stay responsive under 25 ms/frame");
             }
         }
 
@@ -3402,9 +3702,19 @@ static KeyboardAndFinalIntegrationTests keyboardAndFinalIntegrationTests;
 
 } // namespace
 
-int main()
+int main(int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+
+    juce::String runMode = "all";
+    for (int i = 1; i < argc; ++i)
+    {
+        const juce::String arg(argv[i]);
+        if (arg == "--mode" && i + 1 < argc)
+            runMode = juce::String(argv[++i]).toLowerCase();
+        else if (arg.startsWith("--mode="))
+            runMode = arg.fromFirstOccurrenceOf("=", false, false).toLowerCase();
+    }
 
     const auto previewOutDir = juce::SystemStats::getEnvironmentVariable("ALLY_C4B_PREVIEW_DIR", {});
     if (previewOutDir.isNotEmpty())
@@ -3946,7 +4256,25 @@ int main()
 
     juce::UnitTestRunner runner;
     runner.setAssertOnFailure(false);
-    runner.runTestsInCategory("AllyBass");
+
+    if (runMode == "concurrency")
+    {
+        gEnforceWallClockRenderBudgets = false;
+        juce::Array<juce::UnitTest*> concurrencyUnits;
+        concurrencyUnits.add(&concurrencyRealtimeSafetyD1CTests);
+        concurrencyUnits.add(&scopeAndOutputMeterTests);
+        runner.runTests(concurrencyUnits);
+    }
+    else if (runMode == "functional")
+    {
+        gEnforceWallClockRenderBudgets = false;
+        runner.runTestsInCategory("AllyBass");
+    }
+    else
+    {
+        gEnforceWallClockRenderBudgets = true;
+        runner.runTestsInCategory("AllyBass");
+    }
 
     int totalFailures = 0;
     for (int i = 0; i < runner.getNumResults(); ++i)

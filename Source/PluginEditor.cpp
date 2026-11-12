@@ -87,7 +87,7 @@ void AllyBassAudioProcessorEditor::releaseQwertyNotesOnly()
 void AllyBassAudioProcessorEditor::releaseAllPressedKeys()
 {
     releaseQwertyNotesOnly();
-    audioProcessor.getKeyboardState().allNotesOff(1);
+    audioProcessor.releaseGuiHeldKeysOnKeyboardState();
 }
 
 void AllyBassAudioProcessorEditor::modifierKeysChanged(const juce::ModifierKeys& modifiers)
