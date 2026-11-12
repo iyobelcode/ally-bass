@@ -7,12 +7,17 @@ namespace AllyDSP
 
 /**
  * 1300 MONO LOCK
- * Crossover filter at 90 Hz that forces all sub frequencies strictly into mono
- * while preserving stereo width above 90 Hz to eliminate club phase cancellation.
+ * Phase-consistent Mid/Side sub-bass mono lock at 90 Hz:
+ * preserves the Mid (L+R)/2 component bit-identically with zero magnitude/phase/transient
+ * distortion while high-passing only the Side (L-R)/2 component with a 24 dB/oct
+ * cascaded 2nd-order Butterworth (LR4-slope) HPF and a click-free 8 ms bypass crossfade.
  */
 class MonoLockFilter
 {
 public:
+    static constexpr float crossoverHz = 90.0f;
+    static constexpr double toggleCrossfadeSeconds = 0.008;
+
     MonoLockFilter() = default;
 
     void prepare(const juce::dsp::ProcessSpec& spec)
@@ -22,12 +27,12 @@ public:
         reset();
     }
 
-    void reset()
+    void reset() noexcept
     {
-        lowPassL.reset();
-        lowPassR.reset();
-        highPassL.reset();
-        highPassR.reset();
+        sideHighPassStage1.reset();
+        sideHighPassStage2.reset();
+        sideLockMix = 1.0f;
+        hasInitializedMix = false;
     }
 
     void updateCoefficients()
@@ -35,22 +40,29 @@ public:
         if (currentSampleRate <= 0.0)
             return;
 
-        // 90 Hz Linkwitz-Riley style 2nd order crossover
-        const float cutoff = 90.0f;
-        const float q = juce::MathConstants<float>::sqrt2 * 0.5f; // Butterworth 0.7071
+        const float q = juce::MathConstants<float>::sqrt2 * 0.5f;
+        auto hpCoeffs = juce::dsp::IIR::Coefficients<float>::makeHighPass(currentSampleRate, crossoverHz, q);
 
-        auto lpCoeffs = juce::dsp::IIR::Coefficients<float>::makeLowPass(currentSampleRate, cutoff, q);
-        auto hpCoeffs = juce::dsp::IIR::Coefficients<float>::makeHighPass(currentSampleRate, cutoff, q);
-
-        lowPassL.coefficients = lpCoeffs;
-        lowPassR.coefficients = lpCoeffs;
-        highPassL.coefficients = hpCoeffs;
-        highPassR.coefficients = hpCoeffs;
+        sideHighPassStage1.coefficients = hpCoeffs;
+        sideHighPassStage2.coefficients = hpCoeffs;
+        fadeStep = 1.0f / juce::jmax(1.0f, static_cast<float>(toggleCrossfadeSeconds * currentSampleRate));
     }
 
-    void process(juce::AudioBuffer<float>& buffer, bool monoLockEnabled)
+    void process(juce::AudioBuffer<float>& buffer, bool monoLockEnabled) noexcept
     {
-        if (!monoLockEnabled || buffer.getNumChannels() < 2)
+        if (buffer.getNumChannels() < 2 || buffer.getNumSamples() <= 0)
+            return;
+
+        juce::ScopedNoDenormals noDenormals;
+
+        const float targetMix = monoLockEnabled ? 1.0f : 0.0f;
+        if (!hasInitializedMix)
+        {
+            sideLockMix = targetMix;
+            hasInitializedMix = true;
+        }
+
+        if (targetMix <= 0.0f && sideLockMix <= 0.0f)
             return;
 
         const int numSamples = buffer.getNumSamples();
@@ -59,31 +71,40 @@ public:
 
         for (int i = 0; i < numSamples; ++i)
         {
-            float inL = channelL[i];
-            float inR = channelR[i];
+            if (sideLockMix < targetMix)
+                sideLockMix = juce::jmin(targetMix, sideLockMix + fadeStep);
+            else if (sideLockMix > targetMix)
+                sideLockMix = juce::jmax(targetMix, sideLockMix - fadeStep);
 
-            // Split into low and high bands
-            float lowL = lowPassL.processSample(inL);
-            float lowR = lowPassR.processSample(inR);
+            const float inL = channelL[i];
+            const float inR = channelR[i];
 
-            float highL = highPassL.processSample(inL);
-            float highR = highPassR.processSample(inR);
+            const float mid  = 0.5f * (inL + inR);
+            const float side = 0.5f * (inL - inR);
 
-            // Hard mono lock for low band
-            float monoSub = 0.5f * (lowL + lowR);
+            // 24 dB/oct Side high-pass leaves Mid (and therefore L=R mono + L+R sum) untouched
+            const float hpSide = sideHighPassStage2.processSample(sideHighPassStage1.processSample(side));
+            const float outSide = side + sideLockMix * (hpSide - side);
 
-            // Recombine mono sub with high-passed stereo
-            channelL[i] = monoSub + highL;
-            channelR[i] = monoSub + highR;
+            channelL[i] = mid + outSide;
+            channelR[i] = mid - outSide;
+        }
+
+        if (targetMix <= 0.0f && sideLockMix <= 0.0f)
+        {
+            sideHighPassStage1.reset();
+            sideHighPassStage2.reset();
         }
     }
 
 private:
     double currentSampleRate = 44100.0;
-    juce::dsp::IIR::Filter<float> lowPassL;
-    juce::dsp::IIR::Filter<float> lowPassR;
-    juce::dsp::IIR::Filter<float> highPassL;
-    juce::dsp::IIR::Filter<float> highPassR;
+    float fadeStep = 1.0f / 352.8f;
+    float sideLockMix = 1.0f;
+    bool hasInitializedMix = false;
+
+    juce::dsp::IIR::Filter<float> sideHighPassStage1;
+    juce::dsp::IIR::Filter<float> sideHighPassStage2;
 };
 
 } // namespace AllyDSP

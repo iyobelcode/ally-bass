@@ -850,6 +850,407 @@ public:
     }
 };
 
+class MonoLockDspTests final : public juce::UnitTest
+{
+public:
+    MonoLockDspTests() : juce::UnitTest("ALLY1300 Mono Lock DSP (D.1A)", "AllyBass") {}
+
+    void runTest() override
+    {
+        constexpr double sampleRates[] = { 44100.0, 48000.0, 96000.0 };
+        constexpr int blockSizes[] = { 32, 64, 256, 1024 };
+
+        auto processChunked = [](AllyDSP::MonoLockFilter& filter, juce::AudioBuffer<float>& buffer,
+                                 bool enabled, int blockSize)
+        {
+            const int total = buffer.getNumSamples();
+            juce::AudioBuffer<float> chunk(2, blockSize);
+            for (int offset = 0; offset < total; offset += blockSize)
+            {
+                const int n = juce::jmin(blockSize, total - offset);
+                chunk.setSize(2, n, false, false, true);
+                for (int ch = 0; ch < 2; ++ch)
+                    chunk.copyFrom(ch, 0, buffer, ch, offset, n);
+
+                filter.process(chunk, enabled);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    buffer.copyFrom(ch, offset, chunk, ch, 0, n);
+            }
+        };
+
+        beginTest("Mono L=R frequency sweep 20-200 Hz, phase, transient & M+R reconstruction across SR/BS");
+        {
+            constexpr double sweepFreqs[] = {
+                20.0, 30.0, 41.2, 50.0, 60.0, 65.0, 70.0, 80.0, 90.0, 100.0, 120.0, 150.0, 200.0
+            };
+
+            for (double sr : sampleRates)
+            {
+                for (int bs : blockSizes)
+                {
+                    AllyDSP::MonoLockFilter filter;
+                    filter.prepare({ sr, static_cast<juce::uint32>(bs), 2 });
+
+                    for (double freq : sweepFreqs)
+                    {
+                        const int totalSamples = static_cast<int>(sr * 0.25);
+                        const int settleStart = static_cast<int>(sr * 0.10);
+                        juce::AudioBuffer<float> ref(2, totalSamples);
+                        for (int i = 0; i < totalSamples; ++i)
+                        {
+                            const float x = static_cast<float>(
+                                0.8 * std::sin(2.0 * juce::MathConstants<double>::pi * freq * i / sr));
+                            ref.setSample(0, i, x);
+                            ref.setSample(1, i, x);
+                        }
+
+                        juce::AudioBuffer<float> dut;
+                        dut.makeCopyOf(ref);
+                        filter.reset();
+                        processChunked(filter, dut, true, bs);
+
+                        double sumRefSq = 0.0, sumDutSq = 0.0, sumRefMean = 0.0, sumDutMean = 0.0;
+                        double refSin = 0.0, refCos = 0.0, dutSin = 0.0, dutCos = 0.0;
+                        float maxSampleErr = 0.0f;
+                        const int count = totalSamples - settleStart;
+
+                        for (int i = settleStart; i < totalSamples; ++i)
+                        {
+                            const double ph = 2.0 * juce::MathConstants<double>::pi * freq * i / sr;
+                            const double r = ref.getSample(0, i);
+                            const double d = dut.getSample(0, i);
+                            expect(std::isfinite(d) && std::isfinite(dut.getSample(1, i)),
+                                   "MonoLock output must stay finite");
+                            sumRefSq += r * r;
+                            sumDutSq += d * d;
+                            sumRefMean += r;
+                            sumDutMean += d;
+                            const double sBasis = std::sin(ph);
+                            const double cBasis = std::cos(ph);
+                            refCos += r * sBasis;
+                            refSin += r * cBasis;
+                            dutCos += d * sBasis;
+                            dutSin += d * cBasis;
+                            maxSampleErr = juce::jmax(maxSampleErr,
+                                std::abs(dut.getSample(0, i) - ref.getSample(0, i)),
+                                std::abs(dut.getSample(1, i) - ref.getSample(1, i)));
+                        }
+
+                        const double dbDelta = 20.0 * std::log10(
+                            std::sqrt(sumDutSq / count) / juce::jmax(1e-12, std::sqrt(sumRefSq / count)));
+                        double phaseDeltaDeg = (std::atan2(dutSin, dutCos) - std::atan2(refSin, refCos))
+                                               * 180.0 / juce::MathConstants<double>::pi;
+                        while (phaseDeltaDeg > 180.0) phaseDeltaDeg -= 360.0;
+                        while (phaseDeltaDeg < -180.0) phaseDeltaDeg += 360.0;
+                        const double dcAdded = (sumDutMean - sumRefMean) / count;
+
+                        expect(std::abs(dbDelta) <= 0.1,
+                               "Mono L=R magnitude delta must be within +-0.1 dB across 20-200 Hz");
+                        expect(std::abs(phaseDeltaDeg) < 0.05,
+                               "Mono L=R phase shift must be ~0 deg");
+                        expect(maxSampleErr < 1e-6f,
+                               "Mono L=R waveform must be bit-transparent");
+                        expect(std::abs(dcAdded) < 1e-5,
+                               "Mono L=R must not introduce DC offset");
+                    }
+
+                    // Transient & impulse preservation on L=R
+                    AllyDSP::MonoLockFilter transientFilter;
+                    transientFilter.prepare({ sr, static_cast<juce::uint32>(bs), 2 });
+                    const int nTrans = static_cast<int>(sr * 0.1);
+                    juce::AudioBuffer<float> impRef(2, nTrans), impDut(2, nTrans);
+                    impRef.clear();
+                    impRef.setSample(0, 64, 1.0f);
+                    impRef.setSample(1, 64, 1.0f);
+                    double ph = 0.0;
+                    for (int i = 128; i < nTrans; ++i)
+                    {
+                        const double t = static_cast<double>(i - 128) / sr;
+                        const double f = 55.0 + 545.0 * std::exp(-t / 0.004);
+                        ph += 2.0 * juce::MathConstants<double>::pi * f / sr;
+                        const float chirp = static_cast<float>(0.65 * std::sin(ph) * std::exp(-t / 0.05));
+                        impRef.setSample(0, i, chirp);
+                        impRef.setSample(1, i, chirp);
+                    }
+                    impDut.makeCopyOf(impRef);
+                    processChunked(transientFilter, impDut, true, bs);
+
+                    float maxTransErr = 0.0f;
+                    for (int i = 0; i < nTrans; ++i)
+                    {
+                        maxTransErr = juce::jmax(maxTransErr,
+                            std::abs(impDut.getSample(0, i) - impRef.getSample(0, i)),
+                            std::abs(impDut.getSample(1, i) - impRef.getSample(1, i)));
+                    }
+                    expect(maxTransErr < 1e-6f, "Mono impulse and 808 knock chirp must have zero transient dispersion");
+                }
+            }
+        }
+
+        beginTest("Side suppression below 90 Hz and stereo phase invariance / reconstruction");
+        {
+            for (double sr : sampleRates)
+            {
+                AllyDSP::MonoLockFilter filter;
+                filter.prepare({ sr, 256, 2 });
+
+                auto measureStereo = [&](double freqHz, double ampL, double ampR, double phaseOffsetR)
+                {
+                    const int total = static_cast<int>(sr * 0.6);
+                    const int start = static_cast<int>(sr * 0.3);
+                    juce::AudioBuffer<float> buf(2, total);
+                    for (int i = 0; i < total; ++i)
+                    {
+                        const double ph = 2.0 * juce::MathConstants<double>::pi * freqHz * i / sr;
+                        buf.setSample(0, i, static_cast<float>(ampL * std::sin(ph)));
+                        buf.setSample(1, i, static_cast<float>(ampR * std::sin(ph + phaseOffsetR)));
+                    }
+
+                    juce::AudioBuffer<float> inCopy;
+                    inCopy.makeCopyOf(buf);
+                    filter.reset();
+                    processChunked(filter, buf, true, 256);
+
+                    double inSideSq = 0.0, outSideSq = 0.0, outLSq = 0.0, outRSq = 0.0, meanL = 0.0, meanR = 0.0;
+                    float maxSumErr = 0.0f;
+                    const int n = total - start;
+                    for (int i = start; i < total; ++i)
+                    {
+                        const double iL = inCopy.getSample(0, i);
+                        const double iR = inCopy.getSample(1, i);
+                        const double oL = buf.getSample(0, i);
+                        const double oR = buf.getSample(1, i);
+                        expect(std::isfinite(oL) && std::isfinite(oR), "Stereo output must remain finite");
+                        const double iS = 0.5 * (iL - iR);
+                        const double oS = 0.5 * (oL - oR);
+                        inSideSq += iS * iS;
+                        outSideSq += oS * oS;
+                        outLSq += oL * oL;
+                        outRSq += oR * oR;
+                        meanL += oL;
+                        meanR += oR;
+                        maxSumErr = juce::jmax(maxSumErr,
+                            static_cast<float>(std::abs((oL + oR) - (iL + iR))));
+                    }
+                    struct Res { double sideAttenDb; double lDb; double rDb; float sumErr; double dcMax; };
+                    return Res {
+                        20.0 * std::log10(std::sqrt(outSideSq / n) / juce::jmax(1e-12, std::sqrt(inSideSq / n))),
+                        20.0 * std::log10(juce::jmax(1e-12, std::sqrt(outLSq / n))),
+                        20.0 * std::log10(juce::jmax(1e-12, std::sqrt(outRSq / n))),
+                        maxSumErr,
+                        juce::jmax(std::abs(meanL / n), std::abs(meanR / n))
+                    };
+                };
+
+                // 180 deg pure side suppression curve
+                const auto s20  = measureStereo(20.0,  0.75, -0.75, 0.0);
+                const auto s30  = measureStereo(30.0,  0.75, -0.75, 0.0);
+                const auto s41  = measureStereo(41.2,  0.75, -0.75, 0.0);
+                const auto s65  = measureStereo(65.0,  0.75, -0.75, 0.0);
+                const auto s90  = measureStereo(90.0,  0.75, -0.75, 0.0);
+                const auto s200 = measureStereo(200.0, 0.75, -0.75, 0.0);
+
+                expect(s20.sideAttenDb  < -50.0, "20 Hz Side must be strongly suppressed (<-50 dB)");
+                expect(s30.sideAttenDb  < -37.0, "30 Hz Side must be strongly suppressed (<-37 dB)");
+                expect(s41.sideAttenDb  < -26.0, "41.2 Hz Side must be suppressed (<-26 dB)");
+                expect(s65.sideAttenDb  < -12.5, "65 Hz Side must be suppressed (<-12.5 dB)");
+                expect(s90.sideAttenDb  < -5.5 && s90.sideAttenDb > -6.6, "90 Hz LR4 Side crossover must be ~-6 dB");
+                expect(s200.sideAttenDb > -0.5 && s200.sideAttenDb <= 0.01, "200 Hz Side must pass cleanly");
+                expect(s30.dcMax < 1e-4 && s90.dcMax < 1e-4, "Must not add DC offset");
+
+                // 90 deg quadrature stereo preserves L+R sum and suppresses sub side
+                const auto q30 = measureStereo(30.0, 0.7, 0.7, juce::MathConstants<double>::halfPi);
+                const auto q90 = measureStereo(90.0, 0.7, 0.7, juce::MathConstants<double>::halfPi);
+                expect(q30.sumErr < 1e-5f && q90.sumErr < 1e-5f,
+                       "90 deg stereo mono sum L+R must reconstruct identically");
+                expect(q30.sideAttenDb < -37.0, "90 deg sub Side at 30 Hz must collapse below -37 dB");
+
+                // Hard-panned stereo collapses sub to center and preserves top panning & L+R sum
+                const auto pan30  = measureStereo(30.0,  0.8, 0.0, 0.0);
+                const auto pan200 = measureStereo(200.0, 0.8, 0.0, 0.0);
+                const auto pan400 = measureStereo(400.0, 0.8, 0.0, 0.0);
+                expect(pan30.sumErr < 1e-5f && pan200.sumErr < 1e-5f && pan400.sumErr < 1e-5f,
+                       "Hard-panned stereo L+R sum must stay exact");
+                expect(std::abs(pan30.lDb - pan30.rDb) < 0.25, "Hard-panned 30 Hz sub must lock to center");
+                expect((pan200.lDb - pan200.rDb) > 1.5, "Hard-panned 200 Hz top must remain left-weighted");
+                expect((pan400.lDb - pan400.rDb) > 8.0, "Hard-panned 400 Hz upper band must retain clear L panning");
+
+                // Composite signal: 40 Hz out-of-phase sub + 180 Hz quadrature top
+                const int compLen = static_cast<int>(sr * 0.6);
+                const int compStart = static_cast<int>(sr * 0.3);
+                juce::AudioBuffer<float> comp(2, compLen);
+                for (int i = 0; i < compLen; ++i)
+                {
+                    const double phSub = 2.0 * juce::MathConstants<double>::pi * 40.0 * i / sr;
+                    const double phTop = 2.0 * juce::MathConstants<double>::pi * 180.0 * i / sr;
+                    const float sub = static_cast<float>(0.5 * std::sin(phSub));
+                    comp.setSample(0, i, sub + static_cast<float>(0.4 * std::sin(phTop)));
+                    comp.setSample(1, i, -sub + static_cast<float>(0.4 * std::cos(phTop)));
+                }
+                filter.reset();
+                processChunked(filter, comp, true, 256);
+
+                double subS = 0.0, subC = 0.0, topS = 0.0, topC = 0.0;
+                const int cn = compLen - compStart;
+                for (int i = compStart; i < compLen; ++i)
+                {
+                    const double phSub = 2.0 * juce::MathConstants<double>::pi * 40.0 * i / sr;
+                    const double phTop = 2.0 * juce::MathConstants<double>::pi * 180.0 * i / sr;
+                    const double s = 0.5 * (comp.getSample(0, i) - comp.getSample(1, i));
+                    subS += s * std::sin(phSub);
+                    subC += s * std::cos(phSub);
+                    topS += s * std::sin(phTop);
+                    topC += s * std::cos(phTop);
+                }
+                const double sideSubAmp = 2.0 * std::hypot(subS, subC) / cn;
+                const double sideTopAmp = 2.0 * std::hypot(topS, topC) / cn;
+                expect(sideSubAmp < 0.03, "40 Hz Side sub component (~0.5 in) must be rejected (<-24 dB)");
+                expect(sideTopAmp > 0.24, "180 Hz Side top stereo (~0.28 in) must survive in composite mix");
+            }
+        }
+
+        beginTest("Click-free Mono Lock ON/OFF toggle, rapid retriggers, and all 14 factory presets on C2");
+        {
+            // 1. Live toggle ON/OFF/ON on active worst-case 50 Hz L=-R stereo and mono L=R
+            for (double sr : sampleRates)
+            {
+                for (int bs : blockSizes)
+                {
+                    AllyDSP::MonoLockFilter filter;
+                    filter.prepare({ sr, static_cast<juce::uint32>(bs), 2 });
+                    const int totalBlocks = juce::jmax(16, static_cast<int>(sr * 0.25) / bs);
+                    juce::AudioBuffer<float> block(2, bs);
+                    float prevL = 0.0f, prevR = 0.0f;
+                    float maxDelta = 0.0f;
+                    int sampleCounter = 0;
+
+                    for (int b = 0; b < totalBlocks; ++b)
+                    {
+                        const bool enabled = ((b / (totalBlocks / 4)) % 2) == 0;
+                        for (int i = 0; i < bs; ++i)
+                        {
+                            const double ph = 2.0 * juce::MathConstants<double>::pi * 50.0 * sampleCounter++ / sr;
+                            const float s = static_cast<float>(0.8 * std::sin(ph));
+                            block.setSample(0, i, s);
+                            block.setSample(1, i, -s);
+                        }
+                        filter.process(block, enabled);
+
+                        for (int i = 0; i < bs; ++i)
+                        {
+                            const float l = block.getSample(0, i);
+                            const float r = block.getSample(1, i);
+                            expect(std::isfinite(l) && std::isfinite(r) && std::abs(l) <= 1.0f && std::abs(r) <= 1.0f,
+                                   "Toggle transition must stay finite and unclipped");
+                            if (b > 0 || i > 0)
+                            {
+                                maxDelta = juce::jmax(maxDelta, std::abs(l - prevL), std::abs(r - prevR));
+                            }
+                            prevL = l;
+                            prevR = r;
+                        }
+                    }
+
+                    expect(maxDelta < 0.03f,
+                           "Live Mono Lock ON/OFF toggle on active stereo must remain click-free");
+                }
+            }
+
+            // 2. All 14 factory presets on C2 (65.4 Hz): Mono Lock ON vs OFF delta must be within +-0.1 dB
+            const auto& presets = AllyPresets::getFactoryPresets();
+            expectEquals(static_cast<int>(presets.size()), 14);
+
+            for (int pIdx = 0; pIdx < static_cast<int>(presets.size()); ++pIdx)
+            {
+                auto measurePresetC2 = [&](bool monoLockOn)
+                {
+                    AllyBassAudioProcessor proc;
+                    proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+                    proc.prepareToPlay(44100.0, 256);
+                    AllyPresets::applyPreset(proc.apvts, pIdx);
+                    setParamPlainValue(proc.apvts, "monoLock1300", monoLockOn ? 1.0f : 0.0f);
+
+                    juce::AudioBuffer<float> buf(2, 256);
+                    juce::MidiBuffer midi;
+                    midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.95f), 0);
+
+                    double sumSq = 0.0;
+                    int countedSamples = 0;
+                    for (int b = 0; b < 45; ++b) // ~260 ms total
+                    {
+                        buf.clear();
+                        proc.processBlock(buf, midi);
+                        midi.clear();
+                        if (b >= 15) // ~87 ms onwards: steady sub & post-transient tail
+                        {
+                            for (int ch = 0; ch < 2; ++ch)
+                            {
+                                const float* ptr = buf.getReadPointer(ch);
+                                for (int s = 0; s < buf.getNumSamples(); ++s)
+                                    sumSq += static_cast<double>(ptr[s]) * static_cast<double>(ptr[s]);
+                            }
+                            countedSamples += buf.getNumSamples() * 2;
+                        }
+                    }
+                    return 20.0 * std::log10(juce::jmax(1e-12, std::sqrt(sumSq / countedSamples)));
+                };
+
+                const double offDb = measurePresetC2(false);
+                const double onDb  = measurePresetC2(true);
+                const double deltaDb = onDb - offDb;
+                DBG("Preset[" << pIdx << "] " << presets[static_cast<size_t>(pIdx)].name
+                    << " C2 ON-OFF delta = " << juce::String(deltaDb, 6) << " dB");
+                expect(std::abs(deltaDb) < 0.1,
+                       "Preset C2 output with Mono Lock ON vs OFF must match within +-0.1 dB");
+            }
+
+            // 3. Rapid MIDI retriggers + preset switches with Mono Lock toggled ON/OFF
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 128);
+                proc.prepareToPlay(48000.0, 128);
+
+                juce::AudioBuffer<float> buf(2, 128);
+                juce::MidiBuffer midi;
+                const int notes[] = { 28, 36, 41, 33, 45, 31 };
+                float maxPeak = 0.0f;
+
+                for (int b = 0; b < 56; ++b)
+                {
+                    midi.clear();
+                    if (b % 4 == 0)
+                    {
+                        const int presetIdx = (b / 4) % 14;
+                        AllyPresets::applyPreset(proc.apvts, presetIdx);
+                        setParamPlainValue(proc.apvts, "monoLock1300", ((b / 4) % 2 == 0) ? 1.0f : 0.0f);
+                        const int note = notes[(b / 4) % 6];
+                        midi.addEvent(juce::MidiMessage::noteOn(1, note, 0.9f), 0);
+                    }
+                    else if (b % 4 == 3)
+                    {
+                        midi.addEvent(juce::MidiMessage::allNotesOff(1), 64);
+                    }
+
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+
+                    for (int ch = 0; ch < 2; ++ch)
+                    {
+                        const float* ptr = buf.getReadPointer(ch);
+                        for (int s = 0; s < buf.getNumSamples(); ++s)
+                        {
+                            expect(std::isfinite(ptr[s]), "Rapid retrigger/preset switch audio must be finite");
+                            maxPeak = juce::jmax(maxPeak, std::abs(ptr[s]));
+                        }
+                    }
+                }
+                expect(maxPeak < 2.0f && maxPeak > 0.01f, "Rapid preset/MIDI retriggers must remain stable");
+            }
+        }
+    }
+};
+
 template <typename ComponentType>
 ComponentType* findChildOfType(juce::Component& root)
 {
@@ -1461,6 +1862,7 @@ public:
 static ParameterAndStateTests parameterAndStateTests;
 static MidiGlideAndAudioTests midiGlideAndAudioTests;
 static PolderPunchTests polderPunchTests;
+static MonoLockDspTests monoLockDspTests;
 static EngineeredDepthTests engineeredDepthTests;
 
 class HeaderBrandingAndPresetTests final : public juce::UnitTest
