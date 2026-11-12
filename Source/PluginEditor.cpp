@@ -12,8 +12,8 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     // 1. Central Visualizer
     addAndMakeVisible(visualizer);
 
-    // 2. Shared Engineered Depth Primary Knobs Panel (DIEPTE, POLDER PUNCH, HAVEN DIRT, WATERWIJK GLIDE, OUTPUT)
-    primaryKnobsPanel = std::make_unique<AllyGUI::PrimaryKnobsPanel>(audioProcessor.apvts);
+    // 2. Shared Engineered Depth Primary Knobs Panel + Post-Output Meter (Stap C.2 + C.4B)
+    primaryKnobsPanel = std::make_unique<AllyGUI::PrimaryKnobsPanel>(audioProcessor.apvts, &audioProcessor);
     addAndMakeVisible(*primaryKnobsPanel);
 
     // 3. Shared Engineered Depth Secondary DSP Panel (STADSDEEL DSP, ATTACK/RELEASE Mini Rings, 036 OVERDRIVE, 1300 MONO LOCK)

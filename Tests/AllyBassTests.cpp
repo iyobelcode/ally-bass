@@ -19,8 +19,12 @@
 #include "GUI/HeaderPanel.h"
 #include "GUI/SettingsOverlay.h"
 #include "GUI/SavePresetOverlay.h"
+#include "GUI/NapWaveVisualizer.h"
+#include "GUI/OutputLevelMeter.h"
 
+#include <atomic>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 namespace
@@ -1809,11 +1813,579 @@ public:
 
 static HeaderBrandingAndPresetTests headerBrandingAndPresetTests;
 
+// ==============================================================================
+// C.4B Regression Suite: Weerwater Vector Scope, Post-Output Peak/RMS Meter & Concurrency
+// ==============================================================================
+class ScopeAndOutputMeterTests final : public juce::UnitTest
+{
+public:
+    ScopeAndOutputMeterTests() : juce::UnitTest("Scope and Output Meter (C.4B)", "AllyBass") {}
+
+    void runTest() override
+    {
+        auto renderAtScale = [](juce::Component& comp, float scale) -> juce::Image
+        {
+            const int rw = juce::jmax(1, juce::roundToInt(static_cast<float>(comp.getWidth()) * scale));
+            const int rh = juce::jmax(1, juce::roundToInt(static_cast<float>(comp.getHeight()) * scale));
+            juce::Image img(juce::Image::ARGB, rw, rh, true);
+            juce::Graphics g(img);
+            g.addTransform(juce::AffineTransform::scale(scale));
+            comp.paintEntireComponent(g, true);
+            return img;
+        };
+
+        auto imageDiffRms = [](const juce::Image& a, const juce::Image& b) -> double
+        {
+            if (a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight())
+                return 1.0;
+
+            const int w = a.getWidth();
+            const int h = a.getHeight();
+            double sumSq = 0.0;
+            const int step = 2;
+            int count = 0;
+
+            for (int y = 0; y < h; y += step)
+            {
+                for (int x = 0; x < w; x += step)
+                {
+                    const auto ca = a.getPixelAt(x, y);
+                    const auto cb = b.getPixelAt(x, y);
+                    const double dr = (ca.getFloatRed()   - cb.getFloatRed());
+                    const double dg = (ca.getFloatGreen() - cb.getFloatGreen());
+                    const double db = (ca.getFloatBlue()  - cb.getFloatBlue());
+                    const double da = (ca.getFloatAlpha() - cb.getFloatAlpha());
+                    sumSq += 0.25 * (dr * dr + dg * dg + db * db + da * da);
+                    ++count;
+                }
+            }
+
+            return count > 0 ? std::sqrt(sumSq / static_cast<double>(count)) : 0.0;
+        };
+
+        beginTest("Lock-free telemetry remains finite and race-free under concurrent audio & GUI reads");
+        {
+            const double sampleRates[] = { 44100.0, 48000.0, 96000.0 };
+            for (const double sr : sampleRates)
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, sr, 256);
+                proc.prepareToPlay(sr, 256);
+
+                std::atomic<bool> stopFlag { false };
+                std::atomic<bool> consumerSawBadFloat { false };
+                std::atomic<uint64_t> consumerReads { 0 };
+
+                std::thread consumer([&]()
+                {
+                    std::array<float, 1536> localScope {};
+                    while (!stopFlag.load(std::memory_order_acquire))
+                    {
+                        proc.getVisualizerData(localScope.data(), 1536);
+                        for (float s : localScope)
+                        {
+                            if (!std::isfinite(s) || std::abs(s) > 10.0f)
+                                consumerSawBadFloat.store(true, std::memory_order_relaxed);
+                        }
+                        const auto peeked = proc.peekOutputMeterMetrics();
+                        if (!std::isfinite(peeked.peakLinear) || !std::isfinite(peeked.rmsLinear))
+                            consumerSawBadFloat.store(true, std::memory_order_relaxed);
+                        consumerReads.fetch_add(1, std::memory_order_relaxed);
+                    }
+                });
+
+                juce::AudioBuffer<float> audio(2, 256);
+                juce::MidiBuffer midi;
+                for (int b = 0; b < 120; ++b)
+                {
+                    midi.clear();
+                    if (b == 2)
+                        midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+                    else if (b == 40)
+                    {
+                        setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+                        setParamPlainValue(proc.apvts, "monoLock1300", 0.0f);
+                        midi.addEvent(juce::MidiMessage::noteOn(1, 45, 0.95f), 0);
+                    }
+                    else if (b == 80)
+                    {
+                        setParamPlainValue(proc.apvts, "overdrive036", 0.0f);
+                        setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+                        midi.addEvent(juce::MidiMessage::noteOff(1, 45), 0);
+                        midi.addEvent(juce::MidiMessage::noteOff(1, 36), 4);
+                    }
+
+                    audio.clear();
+                    proc.processBlock(audio, midi);
+                }
+
+                stopFlag.store(true, std::memory_order_release);
+                consumer.join();
+
+                expect(!consumerSawBadFloat.load(), "Concurrent consumer must never observe NaN, Inf, or torn values");
+                expect(consumerReads.load() > 0, "Concurrent consumer thread must execute reads");
+                expectEquals(static_cast<int>(proc.getVisualizerWriteCounter()), 120);
+                expectWithinAbsoluteError(static_cast<float>(proc.getCurrentSampleRate()),
+                                          static_cast<float>(sr), 0.1f);
+            }
+        }
+
+        beginTest("Post-output Peak/RMS meter and visualizer reflect DSP, masterVolume, mono vs stereo, transients, clip, and silence");
+        {
+            // 1. Stereo & Mono RMS parity (dual-mono signal must NOT read +3dB louder on stereo bus)
+            //    Note: compare with monoLock bypassed because MonoLockFilter intentionally only filters >=2 channels.
+            auto measureSteadyRms = [](int numChannels, float masterDb, bool overdrive, bool monoLock,
+                                       float& outBlockPeak, float& outBlockRms)
+            {
+                AllyBassAudioProcessor p;
+                p.setPlayConfigDetails(0, numChannels, 44100.0, 256);
+                p.prepareToPlay(44100.0, 256);
+                AllyPresets::applyPreset(p.apvts, 0);
+                setParamPlainValue(p.apvts, "masterVolume", masterDb);
+                setParamPlainValue(p.apvts, "overdrive036", overdrive ? 1.0f : 0.0f);
+                setParamPlainValue(p.apvts, "monoLock1300", monoLock ? 1.0f : 0.0f);
+                setParamPlainValue(p.apvts, "attack", 8.0f);
+                setParamPlainValue(p.apvts, "diepte", 0.5f);
+
+                juce::AudioBuffer<float> buf(numChannels, 256);
+                juce::MidiBuffer midi;
+                midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+                for (int b = 0; b < 8; ++b)
+                {
+                    buf.clear();
+                    p.processBlock(buf, midi);
+                    midi.clear();
+                }
+
+                // Consume earlier transients and inspect exact last steady block
+                (void) p.consumeOutputMeterMetrics();
+                buf.clear();
+                p.processBlock(buf, midi);
+
+                double sumSq = 0.0;
+                float peak = 0.0f;
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    const float* ptr = buf.getReadPointer(ch);
+                    for (int s = 0; s < buf.getNumSamples(); ++s)
+                    {
+                        peak = juce::jmax(peak, std::abs(ptr[s]));
+                        sumSq += static_cast<double>(ptr[s]) * static_cast<double>(ptr[s]);
+                    }
+                }
+                outBlockPeak = peak;
+                outBlockRms = static_cast<float>(std::sqrt(sumSq / static_cast<double>(buf.getNumSamples() * numChannels)));
+                return p.peekOutputMeterMetrics();
+            };
+
+            float stereoPeak = 0.0f, stereoRms = 0.0f;
+            const auto stereoMetrics = measureSteadyRms(2, 0.0f, false, false, stereoPeak, stereoRms);
+            expect(stereoPeak > 0.1f, "Stereo active sub note must produce measurable peak");
+            expectWithinAbsoluteError(stereoMetrics.peakLinear, stereoPeak, 1e-4f);
+            expectWithinAbsoluteError(stereoMetrics.rmsLinear, stereoRms, 1e-4f);
+            expectEquals(stereoMetrics.channelCount, 2);
+
+            float monoPeak = 0.0f, monoRms = 0.0f;
+            const auto monoMetrics = measureSteadyRms(1, 0.0f, false, false, monoPeak, monoRms);
+            expectWithinAbsoluteError(monoMetrics.peakLinear, monoPeak, 1e-4f);
+            expectWithinAbsoluteError(monoMetrics.rmsLinear, monoRms, 1e-4f);
+            expectWithinAbsoluteError(monoMetrics.rmsLinear, stereoMetrics.rmsLinear, 1e-4f);
+
+            // Stereo with MonoLock active must also match exact post-DSP buffer peak/RMS
+            float mlPeak = 0.0f, mlRms = 0.0f;
+            const auto mlMetrics = measureSteadyRms(2, 0.0f, false, true, mlPeak, mlRms);
+            expectWithinAbsoluteError(mlMetrics.peakLinear, mlPeak, 1e-4f);
+            expectWithinAbsoluteError(mlMetrics.rmsLinear, mlRms, 1e-4f);
+
+            // 2. Post-masterVolume scaling must visibly scale both OutputMeterMetrics & Visualizer FIFO
+            float attPeak = 0.0f, attRms = 0.0f;
+            const auto attMetrics = measureSteadyRms(2, -12.0f, false, false, attPeak, attRms);
+            expect(attMetrics.rmsLinear < stereoMetrics.rmsLinear * 0.35f,
+                   "masterVolume -12 dB attenuation must scale post-output RMS linearly (~0.25x)");
+
+            // 3. Real clipping threshold detection (> 0 dBFS / >= 1.0 linear) with 036 Overdrive + +6dB
+            float hotPeak = 0.0f, hotRms = 0.0f;
+            const auto hotMetrics = measureSteadyRms(2, 6.0f, true, true, hotPeak, hotRms);
+            expect(hotMetrics.peakLinear >= 1.0f && hotMetrics.clipped,
+                   "Hot overdriven +6dB output must exceed 0 dBFS and latch clipped flag");
+
+            // 4. Latched transient capture & meter ballistics recovery on silence
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+                proc.prepareToPlay(44100.0, 256);
+                setParamPlainValue(proc.apvts, "polderPunch", 1.0f);
+                setParamPlainValue(proc.apvts, "masterVolume", 0.0f);
+
+                juce::AudioBuffer<float> buf(2, 256);
+                juce::MidiBuffer midi;
+                midi.addEvent(juce::MidiMessage::noteOn(1, 36, 1.0f), 0);
+                buf.clear();
+                proc.processBlock(buf, midi);
+                midi.clear();
+
+                // Latch transient peak even if 3 lower/silent blocks happen before GUI consumes
+                midi.addEvent(juce::MidiMessage::allNotesOff(1), 0);
+                for (int b = 0; b < 3; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                    midi.clear();
+                }
+
+                const auto consumed = proc.consumeOutputMeterMetrics();
+                expect(consumed.peakLinear > 0.25f, "Latched peak must preserve short Polder Punch transient until consumed");
+
+                // Drain trailing IIR settle to complete silence
+                for (int b = 0; b < 35; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                }
+                (void) proc.consumeOutputMeterMetrics(); // clear latched peak from previous blocks
+                const auto silentMetrics = proc.peekOutputMeterMetrics();
+                expect(silentMetrics.peakLinear < 1e-4f && silentMetrics.rmsLinear < 1e-4f && !silentMetrics.clipped,
+                       "Telemetry must settle cleanly to zero on silence");
+            }
+
+            // 5. OutputLevelMeter component ballistics, warning/clip threshold & dark idle
+            {
+                AllyGUI::OutputLevelMeter meter;
+                meter.setBounds(0, 0, 14, 130);
+
+                // Silent -> 0 segments lit
+                meter.advanceWithSampledLevels(0.0f, 0.0f, false, 0.022f);
+                expectEquals(meter.getLitPeakSegments(), 0);
+                expect(!meter.isClipLatched());
+                const auto imgSilent = renderAtScale(meter, 1.0f);
+
+                // Normal nominal -6 dBFS -> cyan segments only, no clip
+                const float nomLin = juce::Decibels::decibelsToGain(-6.0f);
+                meter.advanceWithSampledLevels(nomLin, nomLin * 0.707f, false, 0.022f);
+                expect(meter.getLitPeakSegments() >= 10 && meter.getLitPeakSegments() < AllyGUI::OutputLevelMeter::numSegments,
+                       "Nominal -6 dBFS must illuminate proportional meter segments below top clip bar");
+                expect(!meter.isClipLatched());
+                const auto imgNominal = renderAtScale(meter, 1.0f);
+                expect(imageDiffRms(imgSilent, imgNominal) > 0.03,
+                       "Nominal meter level must render clearly different from silent idle");
+
+                // Clip +1 dBFS -> top clip segment latched
+                const float clipLin = juce::Decibels::decibelsToGain(1.0f);
+                meter.advanceWithSampledLevels(clipLin, 0.85f, true, 0.022f);
+                expect(meter.isClipLatched());
+                expectEquals(meter.getPeakHoldSegmentIndex(), AllyGUI::OutputLevelMeter::numSegments - 1);
+                const auto imgClip = renderAtScale(meter, 1.0f);
+                expect(imageDiffRms(imgNominal, imgClip) > 0.015,
+                       "Overload/clip meter state must differ visually from nominal level");
+
+                // Decay back to silence after releasing clip hold
+                for (int f = 0; f < 100; ++f)
+                    meter.advanceWithSampledLevels(0.0f, 0.0f, false, 0.025f);
+                expectEquals(meter.getLitPeakSegments(), 0);
+                expect(!meter.isClipLatched());
+            }
+        }
+
+        beginTest("Weerwater Vector Scope layout, zero fake coherence, parameter responsiveness, and non-shrinking meter integration");
+        {
+            AllyBassAudioProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditor());
+            expect(editor != nullptr, "Editor must be created");
+
+            if (editor != nullptr)
+            {
+                auto* scope = findChildOfType<AllyGUI::NapWaveVisualizer>(*editor);
+                auto* primaryPanel = findChildOfType<AllyGUI::PrimaryKnobsPanel>(*editor);
+                expect(scope != nullptr, "NapWaveVisualizer must exist in editor");
+                expect(primaryPanel != nullptr, "PrimaryKnobsPanel must exist in editor");
+
+                if (scope != nullptr && primaryPanel != nullptr)
+                {
+                    auto* meter = primaryPanel->getOutputMeter();
+                    expect(meter != nullptr, "PrimaryKnobsPanel must contain integrated OutputLevelMeter");
+
+                    // 1. Verify responsive bounds across 680x500, 780x580, 1200x850
+                    const juce::Point<int> sizes[] = { { 680, 500 }, { 780, 580 }, { 1200, 850 } };
+                    for (const auto& sz : sizes)
+                    {
+                        editor->setSize(sz.x, sz.y);
+
+                        expect(!scope->getPanelBounds().isEmpty());
+                        expect(scope->getLocalBounds().toFloat().contains(scope->getPanelBounds()));
+                        expect(scope->getPanelBounds().contains(scope->getHeaderBounds()));
+                        expect(scope->getPanelBounds().contains(scope->getScaleBounds()));
+                        expect(scope->getPanelBounds().contains(scope->getPlotBounds()));
+                        expect(scope->getScaleBounds().getRight() < scope->getPlotBounds().getX(),
+                               "Left elevation scale must sit strictly left of waveform plot");
+                        expect(scope->getHeaderBounds().getBottom() <= scope->getPlotBounds().getY(),
+                               "Top scope header must sit strictly above plot");
+
+                        if (meter != nullptr)
+                        {
+                            expect(primaryPanel->getChassisBounds().contains(meter->getBounds().toFloat()),
+                                   "OutputLevelMeter must fit inside PrimaryKnobsPanel chassis");
+                            expect(primaryPanel->getKnob(4)->getRight() <= meter->getX(),
+                                   "OutputLevelMeter must not overlap OUTPUT DepthRingKnob");
+                            expect(meter->getWidth() >= 9 && meter->getHeight() >= 48,
+                                   "OutputLevelMeter must remain legible at all window sizes");
+                        }
+                    }
+
+                    editor->setSize(780, 580);
+
+                    // 2. Verify NO fake 100% coherence percentage and honest MONO LOCK status text
+                    setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+                    std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> silenceBuf {};
+                    scope->updateScopeWithSamples(silenceBuf.data(),
+                                                  AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                                  false, true, 44100.0);
+                    expect(!scope->getDisplayedMonoStatusText(false).contains("100%"),
+                           "Scope must never display fake 100% phase coherence");
+                    expect(scope->getDisplayedMonoStatusText(false).contains("ACTIVE"));
+                    expect(!scope->isSignalActive(), "Silent input must keep scope calm on -4.5 m NAP datum");
+
+                    const auto scopeSilentImg = renderAtScale(*scope, 1.0f);
+
+                    setParamPlainValue(proc.apvts, "monoLock1300", 0.0f);
+                    scope->updateScopeWithSamples(silenceBuf.data(),
+                                                  AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                                  false, false, 44100.0);
+                    expect(scope->getDisplayedMonoStatusText(false).contains("BYPASSED"));
+                    const auto scopeBypassedImg = renderAtScale(*scope, 1.0f);
+                    expect(imageDiffRms(scopeSilentImg, scopeBypassedImg) > 0.002,
+                           "Toggling 1300 MONO LOCK must update visible status in Scope");
+
+                    // 3. Feed real rendered synth wave (note C2 + Overdrive + Polder Punch) and verify visual change
+                    proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+                    proc.prepareToPlay(44100.0, 256);
+                    AllyPresets::applyPreset(proc.apvts, 0);
+                    setParamPlainValue(proc.apvts, "polderPunch", 0.8f);
+                    setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+                    setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+
+                    juce::AudioBuffer<float> audio(2, 256);
+                    juce::MidiBuffer midi;
+                    midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.95f), 0);
+                    for (int b = 0; b < 8; ++b)
+                    {
+                        audio.clear();
+                        proc.processBlock(audio, midi);
+                        midi.clear();
+                    }
+
+                    std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> liveBuf {};
+                    proc.getVisualizerData(liveBuf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+                    scope->updateScopeWithSamples(liveBuf.data(),
+                                                  AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                                  proc.isOverdriveActive(),
+                                                  proc.isMonoLockActive(),
+                                                  proc.getCurrentSampleRate());
+                    expect(scope->isSignalActive(), "Live sub audio must activate Weerwater Vector Scope waveform");
+                    const auto scopeLiveImg = renderAtScale(*scope, 1.0f);
+                    expect(imageDiffRms(scopeSilentImg, scopeLiveImg) > 0.02,
+                           "Active sub waveform must render noticeably different from silent datum line");
+
+                    // 4. HiDPI scaling checks + CPU paint micro-benchmark
+                    const float scales[] = { 1.0f, 1.25f, 1.5f, 2.0f };
+                    for (const float scale : scales)
+                    {
+                        const auto scaledScope = renderAtScale(*scope, scale);
+                        expect(scaledScope.isValid() && scaledScope.getWidth() > 0 && scaledScope.getHeight() > 0);
+                    }
+
+                    const double t0 = juce::Time::getMillisecondCounterHiRes();
+                    for (int frame = 0; frame < 60; ++frame)
+                    {
+                        (void) renderAtScale(*scope, 1.0f);
+                        if (meter != nullptr)
+                            (void) renderAtScale(*meter, 1.0f);
+                    }
+                    const double elapsedMs = juce::Time::getMillisecondCounterHiRes() - t0;
+                    const double avgMsPerFrame = elapsedMs / 60.0;
+                    logMessage("Scope + OutputLevelMeter 1x software render avg: "
+                               + juce::String(avgMsPerFrame, 3) + " ms/frame");
+                    expect(avgMsPerFrame < 15.0,
+                           "Average software render time for Scope + OutputMeter must remain smooth under 15 ms/frame");
+                }
+            }
+        }
+    }
+};
+
+static ScopeAndOutputMeterTests scopeAndOutputMeterTests;
+
 } // namespace
 
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+
+    const auto previewOutDir = juce::SystemStats::getEnvironmentVariable("ALLY_C4B_PREVIEW_DIR", {});
+    if (previewOutDir.isNotEmpty())
+    {
+        juce::File dir(previewOutDir);
+        dir.createDirectory();
+
+        AllyBassAudioProcessor proc;
+        proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+        proc.prepareToPlay(44100.0, 256);
+        AllyPresets::applyPreset(proc.apvts, 0);
+        setParamPlainValue(proc.apvts, "polderPunch", 0.35f);
+        setParamPlainValue(proc.apvts, "masterVolume", 0.0f);
+
+        juce::AudioBuffer<float> audio(2, 256);
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.92f), 0);
+        for (int b = 0; b < 8; ++b)
+        {
+            audio.clear();
+            proc.processBlock(audio, midi);
+            midi.clear();
+        }
+
+        std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
+        ed->setSize(780, 580);
+
+        auto* scope = findChildOfType<AllyGUI::NapWaveVisualizer>(*ed);
+        auto* primary = findChildOfType<AllyGUI::PrimaryKnobsPanel>(*ed);
+        auto* meter = primary != nullptr ? primary->getOutputMeter() : nullptr;
+
+        if (scope != nullptr)
+        {
+            std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> liveBuf {};
+            proc.getVisualizerData(liveBuf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+            scope->updateScopeWithSamples(liveBuf.data(),
+                                          AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                          proc.isOverdriveActive(),
+                                          proc.isMonoLockActive(),
+                                          proc.getCurrentSampleRate());
+        }
+        if (meter != nullptr)
+        {
+            const auto metrics = proc.peekOutputMeterMetrics();
+            for (int i = 0; i < 6; ++i)
+                meter->advanceWithSampledLevels(metrics.peakLinear, metrics.rmsLinear, metrics.clipped, 0.022f);
+        }
+
+        auto save2x = [&](juce::Component& c, const juce::String& fileName)
+        {
+            const int rw = c.getWidth() * 2;
+            const int rh = c.getHeight() * 2;
+            juce::Image img(juce::Image::ARGB, rw, rh, true);
+            {
+                juce::Graphics g(img);
+                g.addTransform(juce::AffineTransform::scale(2.0f));
+                c.paintEntireComponent(g, true);
+            }
+            juce::PNGImageFormat png;
+            auto targetFile = dir.getChildFile(fileName);
+            targetFile.deleteFile();
+            if (auto out = targetFile.createOutputStream())
+                png.writeImageToStream(img, *out);
+        };
+
+        // 1. Full 780x580 Editor @ 2x with active C2 sub wave and live output meter
+        save2x(*ed, "c4b_editor_preview_2x.png");
+
+        // 2. Scope states comparison (Active Cyan vs Overdrive vs Silence/Bypassed) stacked cleanly @ 2x
+        if (scope != nullptr)
+        {
+            save2x(*scope, "c4b_scope_closeup_2x.png");
+
+            // Render Overdrive + Bypassed + Silent comparison sheet
+            const int sw = scope->getWidth() * 2;
+            const int sh = scope->getHeight() * 2;
+            juce::Image statesSheet(juce::Image::ARGB, sw, sh * 3, true);
+            juce::Graphics gs(statesSheet);
+
+            // Row 0: Nominal active C2 + Mono Lock ON
+            {
+                gs.saveState();
+                gs.addTransform(juce::AffineTransform::scale(2.0f));
+                scope->paintEntireComponent(gs, true);
+                gs.restoreState();
+            }
+            // Row 1: Overdrive ON + Mono Lock Bypassed
+            {
+                std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> odBuf {};
+                proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+                setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+                setParamPlainValue(proc.apvts, "monoLock1300", 0.0f);
+                midi.addEvent(juce::MidiMessage::noteOn(1, 41, 1.0f), 0);
+                for (int b = 0; b < 6; ++b) { audio.clear(); proc.processBlock(audio, midi); midi.clear(); }
+                proc.getVisualizerData(odBuf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+                scope->updateScopeWithSamples(odBuf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount, true, false, 44100.0);
+
+                gs.saveState();
+                gs.addTransform(juce::AffineTransform::translation(0.0f, static_cast<float>(sh))
+                                    .scaled(1.0f));
+                gs.addTransform(juce::AffineTransform::scale(2.0f));
+                scope->paintEntireComponent(gs, true);
+                gs.restoreState();
+            }
+            // Row 2: Complete Silence (resting calmly on -4.5m NAP datum)
+            {
+                std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> sil {};
+                scope->updateScopeWithSamples(sil.data(), AllyGUI::NapWaveVisualizer::captureSampleCount, false, true, 44100.0);
+
+                gs.saveState();
+                gs.addTransform(juce::AffineTransform::translation(0.0f, static_cast<float>(sh * 2)));
+                gs.addTransform(juce::AffineTransform::scale(2.0f));
+                scope->paintEntireComponent(gs, true);
+                gs.restoreState();
+            }
+
+            juce::PNGImageFormat png;
+            auto sheetFile = dir.getChildFile("c4b_scope_states_2x.png");
+            sheetFile.deleteFile();
+            if (auto out = sheetFile.createOutputStream())
+                png.writeImageToStream(statesSheet, *out);
+        }
+
+        // 3. Output knob + OutputLevelMeter closeup states (Silent / Low -24dB / Nominal -3dB / Clip +1dB) @ 2x
+        if (primary != nullptr && meter != nullptr)
+        {
+            const int cw = 180;
+            const int ch = primary->getHeight();
+            juce::Image meterSheet(juce::Image::ARGB, cw * 4 * 2, ch * 2, true);
+            juce::Graphics gm(meterSheet);
+            gm.fillAll(AllyGUI::EngineeredDepthTheme::Colors::bg);
+
+            const struct { float peak; float rms; bool clip; } states[4] = {
+                { 0.0f, 0.0f, false },
+                { juce::Decibels::decibelsToGain(-24.0f), juce::Decibels::decibelsToGain(-27.0f), false },
+                { juce::Decibels::decibelsToGain(-3.0f),  juce::Decibels::decibelsToGain(-6.0f),  false },
+                { juce::Decibels::decibelsToGain(1.2f),   0.86f, true }
+            };
+
+            const int cropX = juce::jmax(0, primary->getWidth() - cw);
+            for (int col = 0; col < 4; ++col)
+            {
+                meter->reset();
+                for (int step = 0; step < 6; ++step)
+                    meter->advanceWithSampledLevels(states[col].peak, states[col].rms, states[col].clip, 0.022f);
+
+                juce::Image strip(juce::Image::ARGB, primary->getWidth() * 2, ch * 2, true);
+                {
+                    juce::Graphics gs(strip);
+                    gs.addTransform(juce::AffineTransform::scale(2.0f));
+                    primary->paintEntireComponent(gs, true);
+                }
+                gm.drawImage(strip,
+                             col * cw * 2, 0, cw * 2, ch * 2,
+                             cropX * 2, 0, cw * 2, ch * 2);
+            }
+
+            juce::PNGImageFormat png;
+            auto meterFile = dir.getChildFile("c4b_meter_states_2x.png");
+            meterFile.deleteFile();
+            if (auto out = meterFile.createOutputStream())
+                png.writeImageToStream(meterSheet, *out);
+        }
+
+        return 0;
+    }
+
     juce::UnitTestRunner runner;
     runner.setAssertOnFailure(false);
     runner.runTestsInCategory("AllyBass");

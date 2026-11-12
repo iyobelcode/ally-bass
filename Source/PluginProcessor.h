@@ -58,11 +58,32 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    // Visualizer Audio FIFO
-    static constexpr int visualizerBufferSize = 512;
+    // Visualizer Audio FIFO & Real-Time Output Meter Telemetry (Lock-Free Audio -> GUI)
+    static constexpr int visualizerBufferSize = 2048;
+    static_assert((visualizerBufferSize & (visualizerBufferSize - 1)) == 0,
+                  "visualizerBufferSize must be a power of two");
+
+    struct OutputMeterMetrics
+    {
+        float peakLinear      = 0.0f;
+        float rmsLinear       = 0.0f;
+        float leftPeakLinear  = 0.0f;
+        float rightPeakLinear = 0.0f;
+        int   channelCount    = 2;
+        bool  clipped         = false;
+        uint64_t updateCounter = 0;
+    };
+
     void getVisualizerData(float* destination, int numSamples);
+    uint64_t getVisualizerWriteCounter() const noexcept;
     bool isOverdriveActive() const noexcept;
+    bool isMonoLockActive() const noexcept;
     float getCurrentSubLevel() const noexcept;
+    double getCurrentSampleRate() const noexcept;
+
+    OutputMeterMetrics peekOutputMeterMetrics() const noexcept;
+    OutputMeterMetrics consumeOutputMeterMetrics() noexcept;
+    void resetOutputTelemetry() noexcept;
 
     // MIDI Keyboard State (for on-screen & QWERTY computer keyboard)
     juce::MidiKeyboardState& getKeyboardState() noexcept { return keyboardState; }
@@ -89,10 +110,22 @@ private:
     float releaseRate = 0.999f;
     float targetVelocity = 1.0f;
 
-    // Visualizer Ring Buffer
-    std::array<float, visualizerBufferSize> visualizerBuffer {};
+    // Lock-free Visualizer Ring Buffer & Post-Output Meter Atomics
+    std::array<std::atomic<float>, visualizerBufferSize> visualizerBuffer {};
     std::atomic<int> visualizerWriteIndex { 0 };
+    std::atomic<uint64_t> visualizerWriteCounter { 0 };
     std::atomic<float> currentSubLevel { 0.0f };
+    std::atomic<double> currentSampleRateHz { 44100.0 };
+
+    std::atomic<float> outputLastBlockPeak { 0.0f };
+    std::atomic<float> outputLastBlockRms { 0.0f };
+    std::atomic<float> outputPeakLatched { 0.0f };
+    std::atomic<float> outputRmsLatched { 0.0f };
+    std::atomic<float> outputLeftPeak { 0.0f };
+    std::atomic<float> outputRightPeak { 0.0f };
+    std::atomic<int>   outputChannelCount { 2 };
+    std::atomic<bool>  outputClipLatched { false };
+    std::atomic<uint64_t> outputMeterCounter { 0 };
 
     void handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount);
     void updateEnvelopeRates(float attackMs, float releaseMs);

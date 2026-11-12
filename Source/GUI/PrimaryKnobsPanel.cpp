@@ -5,8 +5,10 @@
 namespace AllyGUI
 {
 
-PrimaryKnobsPanel::PrimaryKnobsPanel(juce::AudioProcessorValueTreeState& apvts)
-    : apvtsRef(apvts)
+PrimaryKnobsPanel::PrimaryKnobsPanel(juce::AudioProcessorValueTreeState& apvts,
+                                     AllyBassAudioProcessor* processorPtr)
+    : apvtsRef(apvts),
+      outputMeter(processorPtr)
 {
     setInterceptsMouseClicks(false, true);
 
@@ -72,6 +74,8 @@ PrimaryKnobsPanel::PrimaryKnobsPanel(juce::AudioProcessorValueTreeState& apvts)
         addAndMakeVisible(*knobs[i]);
     }
 
+    addAndMakeVisible(outputMeter);
+
     if (auto* havenParam = apvtsRef.getParameter("havenDirt"))
         havenDirtNormalized.store(havenParam->getValue(), std::memory_order_relaxed);
 
@@ -120,9 +124,18 @@ void PrimaryKnobsPanel::resized()
     const float topPad    = juce::jlimit(4.0f, 10.0f, chassisBounds.getHeight() * 0.028f);
     const float bottomPad = juce::jlimit(4.0f, 10.0f, chassisBounds.getHeight() * 0.028f);
 
-    const auto innerArea = chassisBounds.reduced(sidePad, 0.0f)
-                                        .withTop(chassisBounds.getY() + topPad)
-                                        .withBottom(chassisBounds.getBottom() - bottomPad);
+    const float meterW        = juce::jlimit(11.0f, 17.0f, chassisBounds.getWidth() * 0.0185f);
+    const float meterRightPad = juce::jlimit(5.0f, 10.0f, chassisBounds.getWidth() * 0.0095f);
+    const float meterLeftGap  = 3.0f;
+
+    const float slotsAvailLeft  = chassisBounds.getX() + sidePad;
+    const float meterLeftEdge   = chassisBounds.getRight() - meterRightPad - meterW;
+    const float slotsAvailRight = meterLeftEdge - meterLeftGap;
+
+    const auto innerArea = juce::Rectangle<float>(slotsAvailLeft,
+                                                  chassisBounds.getY() + topPad,
+                                                  juce::jmax(100.0f, slotsAvailRight - slotsAvailLeft),
+                                                  chassisBounds.getHeight() - topPad - bottomPad);
 
     // Exact equal integer width/height/y for every slot guarantees identical dial diameter & baselines
     const int equalSlotW = juce::jmax(40, static_cast<int>(std::floor(innerArea.getWidth() / static_cast<float>(knobCount))));
@@ -138,6 +151,33 @@ void PrimaryKnobsPanel::resized()
         if (knobs[static_cast<size_t>(i)] != nullptr)
             knobs[static_cast<size_t>(i)]->setBounds(rect);
     }
+
+    // Align vertical segmented LED output meter directly alongside OUTPUT dial without infringing on any knob slot
+    const float topChamfer    = juce::jlimit(8.0f, 18.0f, chassisBounds.getHeight() * 0.078f);
+    const float bottomChamfer = juce::jlimit(7.0f, 15.0f, chassisBounds.getHeight() * 0.064f);
+    const int meterX = juce::jmax(startX + totalSlotsW + 2, juce::roundToInt(meterLeftEdge));
+    const int meterIntW = juce::jmax(9, juce::roundToInt(meterW));
+
+    float meterTopY = chassisBounds.getY() + topChamfer + 2.0f;
+    float meterBotY = chassisBounds.getBottom() - bottomChamfer - 2.0f;
+
+    if (knobs[4] != nullptr && !knobs[4]->getDialBounds().isEmpty())
+    {
+        const float k4y = static_cast<float>(knobs[4]->getY());
+        const auto dialR = knobs[4]->getDialBounds();
+        const auto titleR = knobs[4]->getTitleBounds();
+        const auto readR = knobs[4]->getReadoutBounds();
+
+        const float desiredTop = k4y + juce::jmin(dialR.getY() - 2.0f, titleR.getBottom() + 2.0f);
+        const float desiredBot = k4y + (readR.isEmpty() ? dialR.getBottom() : (readR.getY() + readR.getHeight() * 0.42f));
+
+        meterTopY = juce::jmax(chassisBounds.getY() + topChamfer + 2.0f, desiredTop);
+        meterBotY = juce::jmin(chassisBounds.getBottom() - bottomChamfer - 2.0f, desiredBot);
+    }
+
+    const int meterIntY = juce::roundToInt(meterTopY);
+    const int meterIntH = juce::jmax(32, juce::roundToInt(meterBotY - meterTopY));
+    outputMeter.setBounds(meterX, meterIntY, meterIntW, meterIntH);
 }
 
 void PrimaryKnobsPanel::paint(juce::Graphics& g)

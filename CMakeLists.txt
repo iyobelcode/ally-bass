@@ -60,6 +60,8 @@ set(ALLY_SHARED_SOURCES
     Source/GUI/DepthRingLookAndFeel.cpp
     Source/GUI/DepthRingKnob.h
     Source/GUI/DepthRingKnob.cpp
+    Source/GUI/OutputLevelMeter.h
+    Source/GUI/OutputLevelMeter.cpp
     Source/GUI/PrimaryKnobsPanel.h
     Source/GUI/PrimaryKnobsPanel.cpp
     Source/GUI/EngineeredDepthComboBox.h
