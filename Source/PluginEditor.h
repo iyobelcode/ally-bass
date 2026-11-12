@@ -4,15 +4,14 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
-#include "GUI/BrutalistLookAndFeel.h"
+#include "GUI/EngineeredDepthTheme.h"
 #include "GUI/PrimaryKnobsPanel.h"
 #include "GUI/SecondaryDspPanel.h"
 #include "GUI/HeaderPanel.h"
 #include "GUI/SettingsOverlay.h"
 #include "GUI/SavePresetOverlay.h"
 #include "GUI/NapWaveVisualizer.h"
-#include "GUI/HeavyKnob.h"
-#include "GUI/BrutalistToggle.h"
+#include "GUI/KeyboardPanel.h"
 
 class AllyBassAudioProcessorEditor : public juce::AudioProcessorEditor
 {
@@ -31,10 +30,19 @@ public:
     void releaseQwertyNotesOnly();
     void releaseAllPressedKeys();
 
-    // Header, Preset & Modal Dialog Accessors (Stap C.4A)
+    // Header, Keyboard, Panel & Modal Dialog Accessors (Stap C.4A - C.4C)
     AllyGUI::HeaderPanel* getHeaderPanel() const noexcept { return headerPanel.get(); }
+    AllyGUI::PrimaryKnobsPanel* getPrimaryKnobsPanel() const noexcept { return primaryKnobsPanel.get(); }
+    AllyGUI::SecondaryDspPanel* getSecondaryDspPanel() const noexcept { return secondaryDspPanel.get(); }
+    AllyGUI::KeyboardPanel* getKeyboardPanel() const noexcept { return keyboardPanel.get(); }
+    AllyGUI::NapWaveVisualizer& getVisualizer() noexcept { return visualizer; }
     AllyGUI::SettingsOverlay* getSettingsOverlay() const noexcept { return settingsOverlay.get(); }
     AllyGUI::SavePresetOverlay* getSavePresetOverlay() const noexcept { return savePresetOverlay.get(); }
+    int getCurrentOctave() const noexcept { return currentOctave; }
+    void setCurrentOctaveSafe(int targetOctave);
+    juce::String getFooterStatusText() const;
+    juce::String getFooterCreditsText() const;
+    juce::Rectangle<int> getFooterBounds() const noexcept;
     bool isModalOverlayVisible() const noexcept;
     void openSettingsModal();
     void openSavePresetModal();
@@ -42,23 +50,32 @@ public:
     void closeModalOverlays();
 
 private:
-    AllyBassAudioProcessor& audioProcessor;
-    AllyGUI::BrutalistLookAndFeel brutalistLookAndFeel;
+    static constexpr int kMinOctave = 0;
+    static constexpr int kMaxOctave = 5;
 
-    // Visualizer
+    struct LayoutMetrics
+    {
+        int sideMargin = 14;
+        int headerHeight = 70;
+        int scopeHeight = 140;
+        int keyboardHeight = 66;
+        int footerHeight = 28;
+    };
+
+    LayoutMetrics computeLayoutMetrics() const noexcept;
+    void repaintFooter();
+
+    AllyBassAudioProcessor& audioProcessor;
+
+    // Visualizer (Weerwater Vector Scope)
     AllyGUI::NapWaveVisualizer visualizer;
 
-    // Interactive On-Screen & Computer Keyboard
-    juce::MidiKeyboardComponent keyboardComponent;
+    // Engineered Depth Interactive Keyboard & Octave Controller (Stap C.4C)
+    std::unique_ptr<AllyGUI::KeyboardPanel> keyboardPanel;
     int currentOctave = 2; // C2 = 36 (optimal 808 root)
     std::map<int, int> activeNotesByKey;
 
-    // Octaaf knoppen
-    juce::TextButton btnOctaveDown { "-" };
-    juce::TextButton btnOctaveUp { "+" };
-    juce::Label lblOctave;
-
-    // The 5 Big Primary Knobs in the shared Engineered Depth chassis (Stap C.2)
+    // The 5 Big Primary Knobs + Output Level Meter in Engineered Depth chassis (Stap C.2 + C.4B)
     std::unique_ptr<AllyGUI::PrimaryKnobsPanel> primaryKnobsPanel;
 
     // Secondary DSP console bar: Stadsdeel DSP, Attack & Release Mini Rings, 036 Overdrive, 1300 Mono Lock (Stap C.3)

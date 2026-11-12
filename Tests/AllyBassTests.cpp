@@ -21,6 +21,7 @@
 #include "GUI/SavePresetOverlay.h"
 #include "GUI/NapWaveVisualizer.h"
 #include "GUI/OutputLevelMeter.h"
+#include "GUI/KeyboardPanel.h"
 
 #include <atomic>
 #include <cmath>
@@ -2214,6 +2215,229 @@ public:
 
 static ScopeAndOutputMeterTests scopeAndOutputMeterTests;
 
+class KeyboardAndFinalIntegrationTests final : public juce::UnitTest
+{
+public:
+    KeyboardAndFinalIntegrationTests() : UnitTest("Keyboard, Octave, Footer and Final UI Integration", "AllyBass") {}
+
+    void runTest() override
+    {
+        beginTest("Engineered Depth UI removes legacy Brutalist buttons and integrates aligned bays across sizes");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+
+            std::unique_ptr<juce::AudioProcessorEditor> baseEd(proc.createEditor());
+            auto* ed = dynamic_cast<AllyBassAudioProcessorEditor*>(baseEd.get());
+            expect(ed != nullptr, "Editor must instantiate cleanly");
+
+            if (ed != nullptr)
+            {
+                // Verify legacy widgets & Brutalist octave TextButtons are completely gone
+                expect(findChildOfType<AllyGUI::HeavyKnob>(*ed) == nullptr, "No HeavyKnob allowed");
+                expect(findChildOfType<AllyGUI::BrutalistToggle>(*ed) == nullptr, "No BrutalistToggle allowed");
+                expect(findChildOfType<juce::TextButton>(*ed) == nullptr,
+                       "Old Brutalist TextButton octave controls must be replaced by KeyboardPanel");
+
+                auto* header    = ed->getHeaderPanel();
+                auto& scope     = ed->getVisualizer();
+                auto* primary   = ed->getPrimaryKnobsPanel();
+                auto* secondary = ed->getSecondaryDspPanel();
+                auto* kbPanel   = ed->getKeyboardPanel();
+
+                expect(header != nullptr && primary != nullptr && secondary != nullptr && kbPanel != nullptr,
+                       "All 5 Engineered Depth bays must be present");
+
+                const juce::Point<int> sizes[] = { { 680, 500 }, { 780, 580 }, { 1200, 850 } };
+                for (const auto& sz : sizes)
+                {
+                    ed->setSize(sz.x, sz.y);
+
+                    const auto full   = ed->getLocalBounds();
+                    const auto hB     = header->getBounds();
+                    const auto sB     = scope.getBounds();
+                    const auto pB     = primary->getBounds();
+                    const auto secB   = secondary->getBounds();
+                    const auto kbB    = kbPanel->getBounds();
+                    const auto footB  = ed->getFooterBounds();
+
+                    expect(full.contains(hB) && full.contains(sB) && full.contains(pB)
+                           && full.contains(secB) && full.contains(kbB) && full.contains(footB),
+                           "All 5 bays and footer must fit inside editor bounds at "
+                           + juce::String(sz.x) + "x" + juce::String(sz.y));
+
+                    expect(hB.getBottom() <= sB.getY()
+                           && sB.getBottom() <= pB.getY()
+                           && pB.getBottom() <= secB.getY()
+                           && secB.getBottom() <= kbB.getY()
+                           && kbB.getBottom() <= footB.getY(),
+                           "Bays must stack top-to-bottom without overlap");
+
+                    expect(std::abs(hB.getX() - sB.getX()) <= 1
+                           && std::abs(sB.getX() - pB.getX()) <= 1
+                           && std::abs(pB.getX() - secB.getX()) <= 1
+                           && std::abs(secB.getX() - kbB.getX()) <= 1,
+                           "Left edges of all 5 console bays must align cleanly");
+
+                    expect(std::abs(hB.getRight() - sB.getRight()) <= 1
+                           && std::abs(sB.getRight() - pB.getRight()) <= 1
+                           && std::abs(pB.getRight() - secB.getRight()) <= 1
+                           && std::abs(secB.getRight() - kbB.getRight()) <= 1,
+                           "Right edges of all 5 console bays must align cleanly");
+
+                    expect(!kbPanel->getChassisBounds().isEmpty());
+                    expect(!kbPanel->getOctaveReadoutBounds().isEmpty());
+                    expect(kbPanel->getOctaveBarBounds().getRight() <= kbPanel->getKeyboardBedBounds().getX(),
+                           "Octave control must sit left of piano keybed without colliding");
+                    expect(kbPanel->getKeyboardBedBounds().getWidth() >= 400
+                           && kbPanel->getKeyboardBedBounds().getHeight() >= 38,
+                           "Keybed must keep comfortable playable dimensions");
+                }
+
+                ed->setSize(780, 580);
+
+                // Truthful footer status + right credits
+                const auto footerStatus = ed->getFooterStatusText();
+                expect(footerStatus.startsWith("OCTAVE: C2 (Z/X) // "));
+                expect(!footerStatus.contains("[A-K]"), "Footer must report accurate [A-P] key range, not [A-K]");
+                expect(footerStatus.contains("[A-P]"));
+                expectEquals(ed->getFooterCreditsText(), juce::String("JUICED UNICORN / IZHIA ARTS / 42GRAM"));
+
+                // HiDPI full-editor scaling and paint performance budget
+                const float scales[] = { 1.0f, 1.25f, 1.5f, 2.0f };
+                for (const float scale : scales)
+                {
+                    const auto img = renderAtScale(*ed, scale);
+                    expect(img.isValid() && img.getWidth() > 0 && img.getHeight() > 0);
+                }
+
+                const double t0 = juce::Time::getMillisecondCounterHiRes();
+                for (int frame = 0; frame < 30; ++frame)
+                    (void) renderAtScale(*ed, 1.0f);
+                const double avgMs = (juce::Time::getMillisecondCounterHiRes() - t0) / 30.0;
+                logMessage("Full editor (780x580) 1x software render avg: " + juce::String(avgMs, 3) + " ms/frame");
+                expect(avgMs < 25.0, "Full Engineered Depth editor paint must stay responsive under 25 ms/frame");
+            }
+        }
+
+        beginTest("Interactive keyboard mouse/MIDI/QWERTY, octave sync, note safety and active cyan rendering");
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+
+            std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+            ed->setSize(780, 580);
+
+            auto* kbPanel = ed->getKeyboardPanel();
+            expect(kbPanel != nullptr);
+            if (kbPanel == nullptr)
+                return;
+
+            auto& kb = kbPanel->getKeyboard();
+            expectEquals(ed->getCurrentOctave(), 2);
+            expectEquals(kbPanel->getDisplayedOctaveText(), juce::String("OCT: C2"));
+            expectEquals(kb.getRangeStart(), 36);
+            expectEquals(kb.getRangeEnd(), 72);
+
+            // Key geometry checks: C2 white note (36), raised titanium C#2 black note (37), C3 (48)
+            const auto rectC2  = kb.getRectangleForKey(36);
+            const auto rectCs2 = kb.getRectangleForKey(37);
+            const auto rectC3  = kb.getRectangleForKey(48);
+            expect(!rectC2.isEmpty() && !rectCs2.isEmpty() && !rectC3.isEmpty());
+            expect(rectC2.getWidth() > rectCs2.getWidth(), "White key must be wider than sharp keycap");
+            expect(rectC2.getHeight() > rectCs2.getHeight(), "White keybed must extend below sharp keycap");
+            expect(rectC3.getX() > rectC2.getX(), "C3 key must sit right of C2 key");
+
+            // Active cyan note glow visual diff vs silent keybed
+            const auto kbSilent = renderAtScale(*kbPanel, 1.0f);
+            proc.getKeyboardState().noteOn(1, 36, 0.92f);
+            proc.getKeyboardState().noteOn(1, 39, 0.88f);
+            kb.timerCallback();
+            const auto kbActive = renderAtScale(*kbPanel, 1.0f);
+            expect(imageDiffRms(kbSilent, kbActive) > 0.008,
+                   "Active MIDI/mouse notes must illuminate keys with subtle Engineered Depth cyan glow");
+
+            // KeyboardState note-on automatically feeds processBlock audio output across blocks
+            juce::AudioBuffer<float> audioBuf(2, 256);
+            juce::MidiBuffer emptyMidi;
+            float kbAudioPeak = 0.0f;
+            for (int b = 0; b < 6; ++b)
+            {
+                audioBuf.clear();
+                emptyMidi.clear();
+                proc.processBlock(audioBuf, emptyMidi);
+                kbAudioPeak = juce::jmax(kbAudioPeak, bufferPeak(audioBuf));
+            }
+            expect(kbAudioPeak > 0.05f, "Note triggered via MidiKeyboardState must produce clear sub audio");
+
+            // Clicking + octave step button releases active notes cleanly, clamps, and syncs SettingsOverlay + Footer
+            expect(kbPanel->getOctaveUpButton().onClick != nullptr);
+            kbPanel->getOctaveUpButton().onClick();
+            expect(!proc.getKeyboardState().isNoteOn(1, 36) && !proc.getKeyboardState().isNoteOn(1, 39),
+                   "Octave up button must release held notes immediately (zero stuck notes)");
+            expectEquals(ed->getCurrentOctave(), 3);
+            expectEquals(kbPanel->getDisplayedOctaveText(), juce::String("OCT: C3"));
+            expectEquals(kb.getRangeStart(), 48);
+            expect(ed->getSettingsOverlay() != nullptr && ed->getSettingsOverlay()->getCurrentOctave() == 3,
+                   "SettingsOverlay octave display must stay synced with keyboard + button");
+            expect(ed->getFooterStatusText().startsWith("OCTAVE: C3 (Z/X) // "));
+
+            // Z / X shortcut sync + upper/lower bounds [0..5]
+            expect(ed->keyPressed(juce::KeyPress('z')));
+            expectEquals(ed->getCurrentOctave(), 2);
+            for (int i = 0; i < 6; ++i)
+            {
+                if (kbPanel->getOctaveUpButton().isEnabled() && kbPanel->getOctaveUpButton().onClick != nullptr)
+                    kbPanel->getOctaveUpButton().onClick();
+            }
+            expectEquals(ed->getCurrentOctave(), 5);
+            expect(!kbPanel->getOctaveUpButton().isEnabled(), "+ button must disable at C5 max");
+            for (int i = 0; i < 8; ++i)
+                ed->keyPressed(juce::KeyPress('z'));
+            expectEquals(ed->getCurrentOctave(), 0);
+            expect(!kbPanel->getOctaveDownButton().isEnabled(), "- button must disable at C0 min");
+            ed->keyPressed(juce::KeyPress('x'));
+            ed->keyPressed(juce::KeyPress('x'));
+            expectEquals(ed->getCurrentOctave(), 2);
+
+            // Focus loss, modal open/close & editor teardown never leave stuck notes
+            proc.getKeyboardState().noteOn(1, 36, 0.9f);
+            proc.getKeyboardState().noteOn(1, 41, 0.9f);
+            ed->focusLost(juce::Component::focusChangedDirectly);
+            expect(!proc.getKeyboardState().isNoteOn(1, 36) && !proc.getKeyboardState().isNoteOn(1, 41),
+                   "focusLost must clear all active notes");
+
+            proc.getKeyboardState().noteOn(1, 43, 0.9f);
+            ed->openSettingsModal();
+            expect(!proc.getKeyboardState().isNoteOn(1, 43));
+            expect(ed->getFooterStatusText().contains("QWERTY PAUSED (MODAL)"),
+                   "Footer must truthfully indicate QWERTY is paused while modal is open");
+            ed->closeModalOverlays();
+            expect(!ed->getFooterStatusText().contains("MODAL"));
+
+            // Preset switching, Secondary DSP & primary parameters remain intact while editor is active
+            expectEquals(proc.getNumPrograms(), 14);
+            for (int pIdx = 0; pIdx < proc.getNumPrograms(); ++pIdx)
+            {
+                proc.setCurrentProgram(pIdx);
+                audioBuf.clear();
+                emptyMidi.clear();
+                proc.processBlock(audioBuf, emptyMidi);
+                expect(bufferPeak(audioBuf) >= 0.0f);
+            }
+
+            proc.getKeyboardState().noteOn(1, 36, 0.95f);
+            ed.reset();
+            expect(!proc.getKeyboardState().isNoteOn(1, 36),
+                   "Destroying editor must release all active keyboard notes cleanly");
+        }
+    }
+};
+
+static KeyboardAndFinalIntegrationTests keyboardAndFinalIntegrationTests;
+
 } // namespace
 
 int main()
@@ -2381,6 +2605,192 @@ int main()
             meterFile.deleteFile();
             if (auto out = meterFile.createOutputStream())
                 png.writeImageToStream(meterSheet, *out);
+        }
+
+        return 0;
+    }
+
+    const auto c4cPreviewDir = juce::SystemStats::getEnvironmentVariable("ALLY_C4C_PREVIEW_DIR", {});
+    if (c4cPreviewDir.isNotEmpty())
+    {
+        juce::File dir(c4cPreviewDir);
+        dir.createDirectory();
+
+        auto writePng = [](const juce::File& target, const juce::Image& image)
+        {
+            juce::PNGImageFormat png;
+            target.deleteFile();
+            if (auto out = target.createOutputStream())
+                png.writeImageToStream(image, *out);
+        };
+
+        auto renderComponentImage = [](juce::Component& c, float scale)
+        {
+            const int rw = juce::roundToInt(static_cast<float>(c.getWidth()) * scale);
+            const int rh = juce::roundToInt(static_cast<float>(c.getHeight()) * scale);
+            juce::Image img(juce::Image::ARGB, rw, rh, true);
+            {
+                juce::Graphics g(img);
+                g.addTransform(juce::AffineTransform::scale(scale));
+                c.paintEntireComponent(g, true);
+            }
+            return img;
+        };
+
+        auto feedScopeAndMeter = [](AllyBassAudioProcessor& proc, AllyBassAudioProcessorEditor& ed, int midiNote)
+        {
+            juce::AudioBuffer<float> audio(2, 256);
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, midiNote, 0.92f), 0);
+            for (int b = 0; b < 8; ++b)
+            {
+                audio.clear();
+                proc.processBlock(audio, midi);
+                midi.clear();
+            }
+
+            std::array<float, AllyGUI::NapWaveVisualizer::captureSampleCount> buf {};
+            proc.getVisualizerData(buf.data(), AllyGUI::NapWaveVisualizer::captureSampleCount);
+            ed.getVisualizer().updateScopeWithSamples(buf.data(),
+                                                      AllyGUI::NapWaveVisualizer::captureSampleCount,
+                                                      proc.isOverdriveActive(),
+                                                      proc.isMonoLockActive(),
+                                                      proc.getCurrentSampleRate());
+
+            if (auto* primary = ed.getPrimaryKnobsPanel())
+            {
+                if (auto* meter = primary->getOutputMeter())
+                {
+                    meter->reset();
+                    const auto metrics = proc.peekOutputMeterMetrics();
+                    for (int step = 0; step < 6; ++step)
+                        meter->advanceWithSampledLevels(metrics.peakLinear, metrics.rmsLinear, metrics.clipped, 0.022f);
+                }
+            }
+        };
+
+        // --- A. Clean Nominal State (780x580 @ 2x + 1200x850 + Keyboard Closeup) ---
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+            AllyPresets::applyPreset(proc.apvts, 0);
+            setParamPlainValue(proc.apvts, "diepte", 0.65f);
+            setParamPlainValue(proc.apvts, "havenDirt", 0.38f);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.42f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 40.0f);
+            setParamPlainValue(proc.apvts, "masterVolume", -1.2f);
+            setParamPlainValue(proc.apvts, "attack", 12.0f);
+            setParamPlainValue(proc.apvts, "release", 280.0f);
+            setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+
+            std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+            ed->setSize(780, 580);
+            feedScopeAndMeter(proc, *ed, 36);
+
+            // Highlight C2 & F#2 actively on Engineered Depth keyboard (syncs MidiKeyboardComponent before paint)
+            proc.getKeyboardState().noteOn(1, 36, 0.94f);
+            proc.getKeyboardState().noteOn(1, 42, 0.85f);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+
+            const auto img780_2x = renderComponentImage(*ed, 2.0f);
+            writePng(dir.getChildFile("01_ALLY1300_UI_780x580_2x.png"), img780_2x);
+
+            // 3. Keyboard + Octave + Footer closeup @ 2x (add D#2 key too for multi-note cyan test)
+            proc.getKeyboardState().noteOn(1, 39, 0.90f);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+            {
+                kbPanel->getKeyboard().timerCallback();
+                const auto fullWithDs2 = renderComponentImage(*ed, 2.0f);
+                const int cropY = juce::jmax(0, (kbPanel->getY() - 8) * 2);
+                const auto closeup = fullWithDs2.getClippedImage({ 0, cropY, fullWithDs2.getWidth(), fullWithDs2.getHeight() - cropY });
+                writePng(dir.getChildFile("03_ALLY1300_Keyboard_Octave_Closeup_2x.png"), closeup);
+            }
+
+            // 2. Large scaled window (1200x850 @ 1x native)
+            ed->setSize(1200, 850);
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+            writePng(dir.getChildFile("02_ALLY1300_UI_1200x850.png"), renderComponentImage(*ed, 1.0f));
+
+            // 5. Master vs Live Comparison sheet if reference path provided
+            const auto masterPath = juce::SystemStats::getEnvironmentVariable("ALLY_MASTER_CROP_PATH", {});
+            if (masterPath.isNotEmpty() && juce::File(masterPath).existsAsFile())
+            {
+                const auto masterImg = juce::ImageFileFormat::loadFrom(juce::File(masterPath));
+                if (masterImg.isValid() && masterImg.getHeight() > 0)
+                {
+                    ed->setSize(780, 580);
+                    proc.getKeyboardState().allNotesOff(1);
+                    proc.getKeyboardState().noteOn(1, 36, 0.94f);
+                    if (auto* kbPanel = ed->getKeyboardPanel())
+                        kbPanel->getKeyboard().timerCallback();
+                    const auto liveImg = renderComponentImage(*ed, 2.0f);
+
+                    const int targetH = 920;
+                    const int pad = 28;
+                    const int labelH = 44;
+                    const int leftW  = juce::roundToInt(static_cast<double>(masterImg.getWidth())
+                                                        * (static_cast<double>(targetH) / static_cast<double>(masterImg.getHeight())));
+                    const int rightW = juce::roundToInt(static_cast<double>(liveImg.getWidth())
+                                                        * (static_cast<double>(targetH) / static_cast<double>(liveImg.getHeight())));
+                    const int sheetW = pad * 3 + leftW + rightW;
+                    const int sheetH = pad * 2 + labelH + targetH;
+
+                    juce::Image compSheet(juce::Image::ARGB, sheetW, sheetH, true);
+                    juce::Graphics gc(compSheet);
+                    gc.fillAll(AllyGUI::EngineeredDepthTheme::Colors::bg);
+
+                    gc.setFont(AllyGUI::EngineeredDepthTheme::makeUiFont(18.0f, true));
+                    gc.setColour(AllyGUI::EngineeredDepthTheme::Colors::textSecondary);
+                    gc.drawText("APPROVED MASTER UI CROP (REFERENCE)",
+                                pad, pad, leftW, labelH - 8, juce::Justification::centredLeft);
+
+                    gc.setColour(AllyGUI::EngineeredDepthTheme::Colors::cyan);
+                    gc.drawText("LIVE COMPILED C++ / JUCE UI (STAP C.4C)",
+                                pad * 2 + leftW, pad, rightW, labelH - 8, juce::Justification::centredLeft);
+
+                    gc.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+                    gc.drawImage(masterImg, pad, pad + labelH, leftW, targetH,
+                                 0, 0, masterImg.getWidth(), masterImg.getHeight());
+                    gc.drawImage(liveImg, pad * 2 + leftW, pad + labelH, rightW, targetH,
+                                 0, 0, liveImg.getWidth(), liveImg.getHeight());
+
+                    writePng(dir.getChildFile("05_ALLY1300_Master_vs_Live_Comparison.png"), compSheet);
+                }
+            }
+        }
+
+        // --- B. Active Overdrive & Alternate Octave State (780x580 @ 2x) ---
+        {
+            AllyBassAudioProcessor proc;
+            proc.setPlayConfigDetails(0, 2, 44100.0, 256);
+            proc.prepareToPlay(44100.0, 256);
+            AllyPresets::applyPreset(proc.apvts, 3); // distinct dark/aggressive preset
+            setParamPlainValue(proc.apvts, "stadsdeel", 2.0f); // Poort 1363
+            setParamPlainValue(proc.apvts, "diepte", 0.78f);
+            setParamPlainValue(proc.apvts, "havenDirt", 0.72f);
+            setParamPlainValue(proc.apvts, "polderPunch", 0.68f);
+            setParamPlainValue(proc.apvts, "waterwijkGlide", 85.0f);
+            setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+            setParamPlainValue(proc.apvts, "monoLock1300", 1.0f);
+            setParamPlainValue(proc.apvts, "masterVolume", -0.5f);
+
+            std::unique_ptr<AllyBassAudioProcessorEditor> ed = std::make_unique<AllyBassAudioProcessorEditor>(proc);
+            ed->setSize(780, 580);
+            ed->setCurrentOctaveSafe(1); // C1
+            feedScopeAndMeter(proc, *ed, 38);
+
+            proc.getKeyboardState().allNotesOff(1);
+            proc.getKeyboardState().noteOn(1, 24, 0.95f); // C1
+            proc.getKeyboardState().noteOn(1, 27, 0.90f); // D#1
+            proc.getKeyboardState().noteOn(1, 31, 0.88f); // G1
+            if (auto* kbPanel = ed->getKeyboardPanel())
+                kbPanel->getKeyboard().timerCallback();
+
+            writePng(dir.getChildFile("04_ALLY1300_Active_State_780x580_2x.png"),
+                     renderComponentImage(*ed, 2.0f));
         }
 
         return 0;

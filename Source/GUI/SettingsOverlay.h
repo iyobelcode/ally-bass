@@ -17,6 +17,7 @@ public:
     ~SettingsOverlay() override = default;
 
     void setCurrentOctave(int octaveNumber);
+    int getCurrentOctave() const noexcept { return currentOctave; }
     void setActivePresetSummary(const juce::String& summaryText);
 
     void paint(juce::Graphics& g) override;

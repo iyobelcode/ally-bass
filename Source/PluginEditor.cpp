@@ -1,15 +1,15 @@
 #include "PluginEditor.h"
 #include "Presets/PresetManager.h"
 
+#include <cctype>
+#include <string_view>
+
 AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcessor& p)
     : AudioProcessorEditor(&p),
       audioProcessor(p),
-      visualizer(p),
-      keyboardComponent(audioProcessor.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
+      visualizer(p)
 {
-    setLookAndFeel(&brutalistLookAndFeel);
-
-    // 1. Central Visualizer
+    // 1. Central Visualizer (Weerwater Vector Scope)
     addAndMakeVisible(visualizer);
 
     // 2. Shared Engineered Depth Primary Knobs Panel + Post-Output Meter (Stap C.2 + C.4B)
@@ -23,84 +23,56 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     // 4. Engineered Depth Top Header, Branding, Preset Toolbar & Modals (Stap C.4A)
     setupHeaderAndModals();
 
-    // 7. Interactive Keyboard Component
-    // Schakel ingebouwde QWERTY-mapping (die standaard op C5 staat!) en focus-steal van MidiKeyboardComponent UIT,
-    // zodat alleen de Editor QWERTY-toetsen afhandelt in het gekozen octaaf (bijv. C2).
-    keyboardComponent.clearKeyMappings();
-    keyboardComponent.setWantsKeyboardFocus(false);
-    keyboardComponent.setOctaveForMiddleC(4); // C2 = MIDI 36, C4 = MIDI 60
-    keyboardComponent.setScrollButtonsVisible(false);
+    // 5. Engineered Depth Interactive Keyboard & Octave Controller (Stap C.4C)
+    keyboardPanel = std::make_unique<AllyGUI::KeyboardPanel>(audioProcessor.getKeyboardState());
+    keyboardPanel->onOctaveStepRequested = [this](int delta)
+    {
+        setCurrentOctaveSafe(currentOctave + delta);
+    };
+    addAndMakeVisible(*keyboardPanel);
     updateKeyboardRange();
-    keyboardComponent.setColour(juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour(0xff22252a));
-    keyboardComponent.setColour(juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour(0xff101214));
-    keyboardComponent.setColour(juce::MidiKeyboardComponent::keyDownOverlayColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
-    keyboardComponent.setColour(juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal.withAlpha(0.3f));
-    keyboardComponent.setColour(juce::MidiKeyboardComponent::upDownButtonBackgroundColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
-    keyboardComponent.setColour(juce::MidiKeyboardComponent::upDownButtonArrowColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
-    addAndMakeVisible(keyboardComponent);
 
-    // Octave controls
-    lblOctave.setText("OCT: C2", juce::dontSendNotification);
-    lblOctave.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::bold));
-    lblOctave.setColour(juce::Label::textColourId, AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
-    lblOctave.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(lblOctave);
-
-    btnOctaveDown.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
-    btnOctaveDown.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
-    btnOctaveDown.setWantsKeyboardFocus(false);
-    btnOctaveDown.onClick = [this]() {
-        releaseAllPressedKeys();
-        currentOctave = juce::jmax(0, currentOctave - 1);
-        updateKeyboardRange();
-        repaint();
-    };
-    addAndMakeVisible(btnOctaveDown);
-
-    btnOctaveUp.setColour(juce::TextButton::buttonColourId, AllyGUI::BrutalistLookAndFeel::concretePanel);
-    btnOctaveUp.setColour(juce::TextButton::textColourOffId, AllyGUI::BrutalistLookAndFeel::industrialText);
-    btnOctaveUp.setWantsKeyboardFocus(false);
-    btnOctaveUp.onClick = [this]() {
-        releaseAllPressedKeys();
-        currentOctave = juce::jmin(5, currentOctave + 1);
-        updateKeyboardRange();
-        repaint();
-    };
-    addAndMakeVisible(btnOctaveUp);
-
-    // Request keyboard focus for QWERTY musical typing
+    // Request keyboard focus on editor only for QWERTY musical typing
     setWantsKeyboardFocus(true);
 
     // Resizability
     setResizable(true, true);
     setResizeLimits(680, 500, 1200, 850);
+    if (resizableCorner != nullptr)
+        resizableCorner->setAlpha(0.24f);
     setSize(780, 580);
 }
 
 AllyBassAudioProcessorEditor::~AllyBassAudioProcessorEditor()
 {
     releaseAllPressedKeys();
-    setLookAndFeel(nullptr);
 }
 
 void AllyBassAudioProcessorEditor::focusGained(juce::Component::FocusChangeType)
 {
+    repaintFooter();
 }
 
 void AllyBassAudioProcessorEditor::focusLost(juce::Component::FocusChangeType)
 {
     releaseAllPressedKeys();
+    repaintFooter();
 }
 
 void AllyBassAudioProcessorEditor::updateKeyboardRange()
 {
-    int lowNote = (currentOctave + 1) * 12; // e.g. Octave 2 -> MIDI 36 (C2)
-    int highNote = juce::jmin(120, lowNote + 36); // 3 volledige octaven (22 witte toetsen)
-    keyboardComponent.setAvailableRange(lowNote, highNote);
-    lblOctave.setText("OCT: C" + juce::String(currentOctave), juce::dontSendNotification);
+    if (keyboardPanel != nullptr)
+        keyboardPanel->setOctaveDisplay(currentOctave, kMinOctave, kMaxOctave);
+}
 
-    if (keyboardComponent.getWidth() > 0)
-        keyboardComponent.setKeyWidth(static_cast<float>(keyboardComponent.getWidth()) / 22.0f);
+void AllyBassAudioProcessorEditor::setCurrentOctaveSafe(int targetOctave)
+{
+    releaseAllPressedKeys();
+    currentOctave = juce::jlimit(kMinOctave, kMaxOctave, targetOctave);
+    updateKeyboardRange();
+    if (settingsOverlay != nullptr)
+        settingsOverlay->setCurrentOctave(currentOctave);
+    repaintFooter();
 }
 
 void AllyBassAudioProcessorEditor::releaseQwertyNotesOnly()
@@ -143,25 +115,15 @@ bool AllyBassAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 
     const int upperKey = std::toupper(key.getKeyCode());
 
-    // Octave Shift: Z / X
+    // Octave Shift: Z / X (synchronized identically with KeyboardPanel - / + buttons)
     if (upperKey == 'Z')
     {
-        releaseAllPressedKeys();
-        currentOctave = juce::jmax(0, currentOctave - 1);
-        updateKeyboardRange();
-        if (settingsOverlay != nullptr)
-            settingsOverlay->setCurrentOctave(currentOctave);
-        repaint();
+        setCurrentOctaveSafe(currentOctave - 1);
         return true;
     }
     if (upperKey == 'X')
     {
-        releaseAllPressedKeys();
-        currentOctave = juce::jmin(5, currentOctave + 1);
-        updateKeyboardRange();
-        if (settingsOverlay != nullptr)
-            settingsOverlay->setCurrentOctave(currentOctave);
-        repaint();
+        setCurrentOctaveSafe(currentOctave + 1);
         return true;
     }
 
@@ -266,6 +228,9 @@ bool AllyBassAudioProcessorEditor::keyStateChanged(bool isKeyDown)
         }
     }
 
+    if (anyHandled)
+        repaintFooter();
+
     return anyHandled;
 }
 
@@ -283,6 +248,7 @@ void AllyBassAudioProcessorEditor::closeModalOverlays()
     if (savePresetOverlay != nullptr)
         savePresetOverlay->setVisible(false);
     grabKeyboardFocus();
+    repaintFooter();
 }
 
 void AllyBassAudioProcessorEditor::openSettingsModal()
@@ -298,6 +264,7 @@ void AllyBassAudioProcessorEditor::openSettingsModal()
             settingsOverlay->setActivePresetSummary(headerPanel->getDisplayedPresetText());
         settingsOverlay->openModal();
     }
+    repaintFooter();
 }
 
 void AllyBassAudioProcessorEditor::openSavePresetModal()
@@ -311,6 +278,7 @@ void AllyBassAudioProcessorEditor::openSavePresetModal()
         savePresetOverlay->prepareForSave(audioProcessor.getPresetStateInfo());
         savePresetOverlay->openModal();
     }
+    repaintFooter();
 }
 
 void AllyBassAudioProcessorEditor::openUserPresetAsync()
@@ -368,6 +336,7 @@ void AllyBassAudioProcessorEditor::setupHeaderAndModals()
         releaseAllPressedKeys();
         if (isShowing())
             grabKeyboardFocus();
+        repaintFooter();
     };
     addChildComponent(*settingsOverlay);
 
@@ -387,84 +356,159 @@ void AllyBassAudioProcessorEditor::setupHeaderAndModals()
         releaseAllPressedKeys();
         if (isShowing())
             grabKeyboardFocus();
+        repaintFooter();
     };
     addChildComponent(*savePresetOverlay);
 }
 
+AllyBassAudioProcessorEditor::LayoutMetrics AllyBassAudioProcessorEditor::computeLayoutMetrics() const noexcept
+{
+    const float w = static_cast<float>(juce::jmax(1, getWidth()));
+    const float h = static_cast<float>(juce::jmax(1, getHeight()));
+
+    LayoutMetrics m;
+    m.sideMargin     = juce::jlimit(12, 20, juce::roundToInt(w * 0.018f));
+    m.headerHeight   = juce::jlimit(60, 86, juce::roundToInt(h * 0.120f));
+    m.footerHeight   = juce::jlimit(24, 32, juce::roundToInt(h * 0.045f));
+    m.keyboardHeight = juce::jlimit(62, 94, juce::roundToInt(h * 0.120f));
+    m.scopeHeight    = juce::jlimit(122, 212, juce::roundToInt(h * 0.242f));
+    return m;
+}
+
+juce::Rectangle<int> AllyBassAudioProcessorEditor::getFooterBounds() const noexcept
+{
+    const auto m = computeLayoutMetrics();
+    return { 0, getHeight() - m.footerHeight, getWidth(), m.footerHeight };
+}
+
+juce::String AllyBassAudioProcessorEditor::getFooterStatusText() const
+{
+    const juce::String octText = "OCTAVE: C" + juce::String(currentOctave) + " (Z/X) // ";
+    if (isModalOverlayVisible())
+        return octText + "QWERTY PAUSED (MODAL)";
+    if (!activeNotesByKey.empty())
+        return octText + "KEYS [A-P] HELD (" + juce::String(static_cast<int>(activeNotesByKey.size())) + ")";
+    if (hasKeyboardFocus(true))
+        return octText + "KEYS [A-P] READY";
+    return octText + "KEYS [A-P] STANDBY";
+}
+
+juce::String AllyBassAudioProcessorEditor::getFooterCreditsText() const
+{
+    return "JUICED UNICORN / IZHIA ARTS / 42GRAM";
+}
+
+void AllyBassAudioProcessorEditor::repaintFooter()
+{
+    const auto fb = getFooterBounds();
+    if (!fb.isEmpty())
+        repaint(fb);
+}
+
 void AllyBassAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    auto bounds = getLocalBounds().toFloat();
+    using Theme = AllyGUI::EngineeredDepthTheme;
 
-    // 1. Concrete Brutalist Main Background (untouched lower section), Engineered Depth header backdrop top
-    g.setColour(AllyGUI::BrutalistLookAndFeel::concreteDark);
+    const auto bounds = getLocalBounds().toFloat();
+    const auto m = computeLayoutMetrics();
+
+    // 1. Unified Abyssal Marine Console Backdrop across the entire window
+    juce::ColourGradient bgGrad(
+        Theme::Colors::bg, bounds.getCentreX(), 0.0f,
+        juce::Colour(0xff040a0e), bounds.getCentreX(), bounds.getBottom(),
+        false);
+    bgGrad.addColour(0.38, juce::Colour(0xff081822));
+    g.setGradientFill(bgGrad);
     g.fillRect(bounds);
 
-    const float headerH = static_cast<float>(juce::jlimit(60, 84, juce::roundToInt(static_cast<float>(getHeight()) * 0.120f)));
-    auto headerArea = bounds.removeFromTop(headerH);
-    g.setColour(AllyGUI::EngineeredDepthTheme::Colors::bg);
-    g.fillRect(headerArea);
+    // 2. Crisp Engineered Depth Footer Bay
+    const auto footerArea = getFooterBounds().toFloat();
+    if (footerArea.isEmpty())
+        return;
 
-    // Panel separator above footer
-    float footerY = static_cast<float>(getHeight() - 30);
-    g.setColour(AllyGUI::BrutalistLookAndFeel::concreteBorder);
-    g.drawHorizontalLine(static_cast<int>(footerY), 0.0f, static_cast<float>(getWidth()));
+    juce::ColourGradient footerGrad(
+        juce::Colour(0xff050e15), footerArea.getCentreX(), footerArea.getY(),
+        juce::Colour(0xff03080c), footerArea.getCentreX(), footerArea.getBottom(),
+        false);
+    g.setGradientFill(footerGrad);
+    g.fillRect(footerArea);
 
-    // Footer Panel Background
-    g.setColour(AllyGUI::BrutalistLookAndFeel::concretePanel);
-    g.fillRect(0.0f, footerY, static_cast<float>(getWidth()), 30.0f);
+    // Metallic top divider & specular micro-hairline
+    g.setColour(Theme::Colors::strokeSubtle.withAlpha(0.74f));
+    g.drawHorizontalLine(juce::roundToInt(footerArea.getY()), 0.0f, bounds.getRight());
+    g.setColour(Theme::Colors::metalRimLight.withAlpha(0.09f));
+    g.drawHorizontalLine(juce::roundToInt(footerArea.getY()) + 1, 0.0f, bounds.getRight());
 
-    // Footer Left: Keyboard instruction & Octave status
-    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 9.0f, juce::Font::bold));
-    g.setColour(AllyGUI::BrutalistLookAndFeel::weerwaterTeal);
-    juce::String kbStatus = "OCTAVE: C" + juce::String(currentOctave) + " (Z/X) // KEYS [A-K] ACTIVE";
-    g.drawText(kbStatus, 16, static_cast<int>(footerY + 6), 300, 16, juce::Justification::left);
+    const auto content = footerArea.reduced(static_cast<float>(m.sideMargin), 0.0f);
+    const float fontPt = juce::jlimit(8.8f, 11.2f, footerArea.getHeight() * 0.35f);
+    const float ledR = 2.2f;
+    const float ledCx = content.getX() + ledR + 1.0f;
+    const float ledCy = content.getCentreY();
 
-    // Footer Center/Right: Requested Master Credits
-    g.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 9.0f, juce::Font::bold));
-    g.setColour(AllyGUI::BrutalistLookAndFeel::industrialText);
-    g.drawText("JUICED UNICORN / IZHIA ARTS / 42GRAM", getWidth() - 320, static_cast<int>(footerY + 6), 300, 16, juce::Justification::right);
+    const bool modalOpen = isModalOverlayVisible();
+    const bool heldKeys = !activeNotesByKey.empty();
+    const bool focused = hasKeyboardFocus(true);
+
+    const auto statusCol = modalOpen
+        ? Theme::Colors::warning
+        : (heldKeys ? Theme::Colors::cyan
+                    : (focused ? Theme::Colors::cyanFocus : Theme::Colors::cyanDim.withAlpha(0.76f)));
+
+    // Subtle status indicator dot + factual keyboard/octave readout
+    g.setColour(statusCol.withAlpha(heldKeys ? 0.30f : 0.14f));
+    g.fillEllipse(ledCx - ledR * 2.0f, ledCy - ledR * 2.0f, ledR * 4.0f, ledR * 4.0f);
+    g.setColour(statusCol);
+    g.fillEllipse(ledCx - ledR, ledCy - ledR, ledR * 2.0f, ledR * 2.0f);
+
+    const auto leftTextArea = content.withTrimmedLeft(ledR * 2.0f + 7.0f)
+                                     .withRight(content.getCentreX() + content.getWidth() * 0.10f);
+    g.setFont(Theme::makeDataFont(fontPt, true));
+    g.setColour(statusCol);
+    g.drawText(getFooterStatusText(), leftTextArea, juce::Justification::centredLeft, true);
+
+    // Footer Right: Master Credits (kept clear of bottom-right resize handle)
+    const auto rightTextArea = content.withLeft(content.getCentreX() - content.getWidth() * 0.04f)
+                                      .withTrimmedRight(6.0f);
+    g.setFont(Theme::makeDataFont(fontPt, false));
+    g.setColour(Theme::Colors::textSecondary.withAlpha(0.78f));
+    g.drawText(getFooterCreditsText(), rightTextArea, juce::Justification::centredRight, true);
 }
 
 void AllyBassAudioProcessorEditor::resized()
 {
+    const auto m = computeLayoutMetrics();
     auto area = getLocalBounds();
 
-    // Engineered Depth Top Header Panel (Stap C.4A)
-    const int headerH = juce::jlimit(60, 84, juce::roundToInt(static_cast<float>(getHeight()) * 0.120f));
-    auto headerBounds = area.removeFromTop(headerH).reduced(14, 3);
+    // 1. Engineered Depth Top Header Panel (Stap C.4A)
+    auto headerBounds = area.removeFromTop(m.headerHeight).reduced(m.sideMargin, 3);
     if (headerPanel != nullptr)
         headerPanel->setBounds(headerBounds);
 
-    // Footer area (30px)
-    area.removeFromBottom(30);
+    // 2. Engineered Depth Footer Bay (painted directly)
+    area.removeFromBottom(m.footerHeight);
 
-    // Bottom Keyboard area (58px) verdeeld over de volledige breedte met octaaf controls
-    auto keyboardRow = area.removeFromBottom(58).reduced(14, 2);
-    auto octArea = keyboardRow.removeFromLeft(100);
-    btnOctaveDown.setBounds(octArea.getX(), octArea.getY() + 14, 26, 28);
-    lblOctave.setBounds(octArea.getX() + 28, octArea.getY() + 14, 44, 28);
-    btnOctaveUp.setBounds(octArea.getX() + 74, octArea.getY() + 14, 26, 28);
+    // 3. Engineered Depth Bottom Keyboard & Octave Chassis (Stap C.4C)
+    auto keyboardArea = area.removeFromBottom(m.keyboardHeight).reduced(m.sideMargin, 3);
+    if (keyboardPanel != nullptr)
+        keyboardPanel->setBounds(keyboardArea);
 
-    keyboardRow.removeFromLeft(8); // kleine marge
-    keyboardComponent.setBounds(keyboardRow);
-    keyboardComponent.setKeyWidth(static_cast<float>(keyboardRow.getWidth()) / 22.0f);
-
-    // Middle Visualizer Area (~140px)
-    auto visualizerArea = area.removeFromTop(140).reduced(14, 4);
+    // 4. Weerwater Vector Scope Bay (Stap C.4B)
+    auto visualizerArea = area.removeFromTop(m.scopeHeight).reduced(m.sideMargin, 4);
     visualizer.setBounds(visualizerArea);
 
-    // Controls Section
-    auto controlsArea = area.reduced(14, 4);
-
-    // 1. Secondary DSP Console Bar (Stadsdeel DSP | Attack & Release Mini Rings | 036 Overdrive | 1300 Mono Lock)
-    const int secondaryH = juce::jlimit(62, 82, juce::roundToInt(static_cast<float>(controlsArea.getHeight()) * 0.23f));
+    // 5. Controls Bay: Primary Knobs (+ Output Meter) above Secondary DSP Bar (aligned on exact side rails)
+    auto controlsArea = area.reduced(m.sideMargin, 4);
+    const int secondaryH = juce::jlimit(60, 100, juce::roundToInt(static_cast<float>(controlsArea.getHeight()) * 0.255f));
     auto secondaryArea = controlsArea.removeFromBottom(secondaryH);
-    secondaryDspPanel->setBounds(secondaryArea.reduced(0, 1));
+    const int bayGap = juce::jlimit(3, 6, juce::roundToInt(static_cast<float>(getHeight()) * 0.007f));
+    controlsArea.removeFromBottom(bayGap);
 
-    // 2. Top Main Knobs Row: Engineered Depth chamfered chassis with 5 uniform Depth Rings
-    primaryKnobsPanel->setBounds(controlsArea.reduced(0, 2));
+    if (secondaryDspPanel != nullptr)
+        secondaryDspPanel->setBounds(secondaryArea);
+    if (primaryKnobsPanel != nullptr)
+        primaryKnobsPanel->setBounds(controlsArea);
 
-    // Full-editor modal overlays sit cleanly centered above all controls when active
+    // Full-editor modal overlays sit cleanly centered above all bays when active
     const auto fullBounds = getLocalBounds();
     if (settingsOverlay != nullptr)
         settingsOverlay->setBounds(fullBounds);

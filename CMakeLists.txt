@@ -50,8 +50,6 @@ set(ALLY_SHARED_SOURCES
     Source/DSP/WaterwijkGlide.h
     Source/DSP/MonoLockFilter.h
     Source/DSP/Overdrive036.h
-    Source/GUI/BrutalistLookAndFeel.h
-    Source/GUI/BrutalistLookAndFeel.cpp
     Source/GUI/EngineeredDepthTheme.h
     Source/GUI/EngineeredDepthTheme.cpp
     Source/GUI/EngineeredDepthIcons.h
@@ -82,8 +80,8 @@ set(ALLY_SHARED_SOURCES
     Source/GUI/SecondaryDspPanel.cpp
     Source/GUI/NapWaveVisualizer.h
     Source/GUI/NapWaveVisualizer.cpp
-    Source/GUI/HeavyKnob.h
-    Source/GUI/BrutalistToggle.h
+    Source/GUI/KeyboardPanel.h
+    Source/GUI/KeyboardPanel.cpp
     Source/Presets/PresetManager.h
 )
 
@@ -113,6 +111,10 @@ if(ALLY_BUILD_TESTS)
     )
     target_sources(AllyBassTests PRIVATE
         Tests/AllyBassTests.cpp
+        Source/GUI/BrutalistLookAndFeel.h
+        Source/GUI/BrutalistLookAndFeel.cpp
+        Source/GUI/HeavyKnob.h
+        Source/GUI/BrutalistToggle.h
         ${ALLY_SHARED_SOURCES}
     )
     target_include_directories(AllyBassTests PRIVATE
