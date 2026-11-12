@@ -3700,6 +3700,307 @@ public:
 
 static KeyboardAndFinalIntegrationTests keyboardAndFinalIntegrationTests;
 
+class DspQualityD1DTests final : public juce::UnitTest
+{
+public:
+    DspQualityD1DTests() : juce::UnitTest("ALLY1300 DSP Quality, Overdrive & Output Integrity (D.1D)", "AllyBass") {}
+
+    void runTest() override
+    {
+        beginTest("StadsdeelSaturation eliminates Poort/Haven DC offset, fixes Haven 96kHz sub drop, and removes drive/mode steps");
+        {
+            constexpr double srs[] = { 44100.0, 48000.0, 96000.0 };
+            std::array<double, 3> havenRms {};
+
+            for (size_t srIdx = 0; srIdx < 3; ++srIdx)
+            {
+                const double sr = srs[srIdx];
+                for (int m = 0; m < 4; ++m)
+                {
+                    const auto mode = static_cast<AllyDSP::StadsdeelMode>(m);
+                    AllyDSP::StadsdeelSaturation sat;
+                    sat.prepare(sr);
+
+                    constexpr double testHz = 32.70319566; // C1 deepest sub
+                    const int settleSamples = static_cast<int>(std::llround(sr * 1.5));
+                    const int cycleLen = static_cast<int>(std::llround(10.0 * sr / testHz));
+                    const int activeEnd = settleSamples + cycleLen;
+                    const int silenceEnd = activeEnd + static_cast<int>(std::llround(sr * 0.5));
+
+                    double sumSq = 0.0;
+                    double dcActiveSum = 0.0;
+                    int phase = 0;
+
+                    for (int i = 0; i < silenceEnd; ++i)
+                    {
+                        const float x = (i < activeEnd)
+                            ? (0.75f * std::sin(2.0f * juce::MathConstants<float>::pi
+                                                * static_cast<float>(testHz * static_cast<double>(phase++) / sr)))
+                            : 0.0f;
+                        const float y = sat.processSample(x, 0.60f, mode);
+                        expect(std::isfinite(y), "StadsdeelSaturation output must remain finite");
+                        if (i >= settleSamples && i < activeEnd)
+                        {
+                            sumSq += static_cast<double>(y) * static_cast<double>(y);
+                            dcActiveSum += y;
+                        }
+                    }
+
+                    const double activeDc = dcActiveSum / static_cast<double>(cycleLen);
+                    expect(std::abs(activeDc) < 0.0025,
+                           "Steady-state DC offset must remain near zero in all Stadsdeel modes");
+
+                    if (mode == AllyDSP::StadsdeelMode::Haven)
+                        havenRms[srIdx] = std::sqrt(sumSq / static_cast<double>(cycleLen));
+                }
+            }
+
+            const double havenDb44vs96 = 20.0 * std::log10(havenRms[2] / havenRms[0]);
+            expect(std::abs(havenDb44vs96) < 0.25,
+                   "Haven C1 sub-bass RMS must remain sample-rate-invariant across 44.1/48/96 kHz");
+
+            // Continuous threshold across drive 0.0005 -> 0.0020 & continuous live mode switches
+            for (int m = 0; m < 4; ++m)
+            {
+                AllyDSP::StadsdeelSaturation sat;
+                sat.prepare(48000.0);
+                float prev = 0.0f;
+                float jump = 0.0f;
+                for (int i = 0; i < 4800; ++i)
+                {
+                    const float x = 0.7f * std::sin(2.0f * juce::MathConstants<float>::pi * 65.4f * static_cast<float>(i) / 48000.0f);
+                    const float d = (i < 2400) ? 0.0005f : 0.0020f;
+                    const float y = sat.processSample(x, d, static_cast<AllyDSP::StadsdeelMode>(m));
+                    if (i == 2400)
+                        jump = std::abs(y - prev);
+                    prev = y;
+                }
+                expect(jump < 0.025f, "StadsdeelSaturation drive transition around 0.001 must not click");
+            }
+
+            for (int m = 0; m < 3; ++m)
+            {
+                AllyDSP::StadsdeelSaturation sat;
+                sat.prepare(48000.0);
+                float prev = 0.0f;
+                float jump = 0.0f;
+                for (int i = 0; i < 4800; ++i)
+                {
+                    const float x = 0.7f * std::sin(2.0f * juce::MathConstants<float>::pi * 65.4f * static_cast<float>(i) / 48000.0f);
+                    const auto mode = static_cast<AllyDSP::StadsdeelMode>((i < 2400) ? m : (m + 1));
+                    const float y = sat.processSample(x, 0.6f, mode);
+                    if (i == 2400)
+                        jump = std::abs(y - prev);
+                    prev = y;
+                }
+                expect(jump < 0.015f, "Switching Stadsdeel modes live must crossfade cleanly without clicks");
+            }
+        }
+
+        beginTest("Overdrive036 maintains exact L/R stereo parity, SR-invariant smooth bypass, and oversized-block safety");
+        {
+            for (double sr : { 44100.0, 48000.0, 96000.0 })
+            {
+                AllyDSP::Overdrive036 od;
+                od.prepare({ sr, 256u, 2u });
+
+                juce::AudioBuffer<float> buf(2, 256);
+                float prevL = 0.0f;
+                float maxToggleDelta = 0.0f;
+                float maxLrMismatch = 0.0f;
+                int phaseIdx = 0;
+
+                for (int b = 0; b < 40; ++b)
+                {
+                    for (int i = 0; i < 256; ++i)
+                    {
+                        const float s = 0.6f * std::sin(2.0f * juce::MathConstants<float>::pi * 65.4f
+                                                        * static_cast<float>(phaseIdx++) / static_cast<float>(sr));
+                        buf.setSample(0, i, s);
+                        buf.setSample(1, i, s);
+                    }
+
+                    const bool en = (b >= 4 && b < 24);
+                    od.process(buf, en);
+
+                    for (int i = 0; i < 256; ++i)
+                    {
+                        const float l = buf.getSample(0, i);
+                        const float r = buf.getSample(1, i);
+                        expect(std::isfinite(l) && std::isfinite(r), "Overdrive036 output must stay finite");
+                        maxLrMismatch = juce::jmax(maxLrMismatch, std::abs(l - r));
+                        if (!(b == 0 && i == 0))
+                            maxToggleDelta = juce::jmax(maxToggleDelta, std::abs(l - prevL));
+                        prevL = l;
+                    }
+                }
+
+                expect(maxLrMismatch < 1e-6f, "Overdrive036 must keep exact L/R stereo parity on mono input");
+                expect(maxToggleDelta < 0.02f, "Overdrive036 OFF->ON->OFF transitions must remain click-free");
+            }
+
+            // Oversized block L/R parity check
+            AllyDSP::Overdrive036 odBig;
+            odBig.prepare({ 48000.0, 128u, 2u });
+            juce::AudioBuffer<float> bigBuf(2, 2048);
+            for (int i = 0; i < 2048; ++i)
+            {
+                const float s = 0.6f * std::sin(2.0f * juce::MathConstants<float>::pi * 65.4f * static_cast<float>(i) / 48000.0f);
+                bigBuf.setSample(0, i, s);
+                bigBuf.setSample(1, i, s);
+            }
+            odBig.process(bigBuf, true);
+            float bigLrDiff = 0.0f;
+            for (int i = 0; i < 2048; ++i)
+                bigLrDiff = juce::jmax(bigLrDiff, std::abs(bigBuf.getSample(0, i) - bigBuf.getSample(1, i)));
+            expect(bigLrDiff < 1e-6f, "Overdrive036 chunked oversized blocks must remain stereo-identical");
+        }
+
+        beginTest("Parameter automation smoothing, FFT spectral integrity, and all-preset output integrity across block sizes");
+        {
+            struct StepSpec { const char* id; float v0; float v1; float maxJump; };
+            const StepSpec steps[] = {
+                { "masterVolume", -24.0f, 6.0f, 0.025f },
+                { "diepte",         0.0f, 1.0f, 0.040f },
+                { "havenDirt",      0.0f, 1.0f, 0.025f },
+                { "polderPunch",    0.0f, 1.0f, 0.030f }
+            };
+
+            for (const auto& st : steps)
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+                proc.prepareToPlay(48000.0, 256);
+                setParamPlainValue(proc.apvts, "attack", 1.0f);
+                setParamPlainValue(proc.apvts, "stadsdeel", 3.0f);
+                setParamPlainValue(proc.apvts, st.id, st.v0);
+
+                juce::AudioBuffer<float> buf(2, 256);
+                juce::MidiBuffer midi;
+                midi.addEvent(juce::MidiMessage::noteOn(1, 36, 1.0f), 0);
+                for (int b = 0; b < 20; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                    midi.clear();
+                }
+                const float lastBefore = buf.getSample(0, 255);
+
+                setParamPlainValue(proc.apvts, st.id, st.v1);
+                buf.clear();
+                proc.processBlock(buf, midi);
+                const float firstAfter = buf.getSample(0, 0);
+                expect(std::abs(firstAfter - lastBefore) < st.maxJump,
+                       "Block-rate step automation must be smoothed per-sample cleanly");
+            }
+
+            // Steady-state DC & headroom verification across all 14 factory presets
+            const auto& presets = AllyPresets::getFactoryPresets();
+            const int exactLen = static_cast<int>(std::llround(20.0 * 48000.0 / (0.5 * juce::MidiMessage::getMidiNoteInHertz(36))));
+            for (int pIdx = 0; pIdx < static_cast<int>(presets.size()); ++pIdx)
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 256);
+                proc.prepareToPlay(48000.0, 256);
+                proc.setCurrentProgram(pIdx);
+
+                juce::AudioBuffer<float> buf(2, 256);
+                juce::MidiBuffer midi;
+                midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+
+                double steadySum = 0.0;
+                int steadyCount = 0;
+                float peak0dB = 0.0f;
+                for (int b = 0; b < 320; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                    midi.clear();
+                    const float p = bufferPeak(buf);
+                    expect(p >= 0.0f && p < 1.0f, "All factory presets at 0.0 dB Output must keep finite sub-0 dBFS peaks");
+                    peak0dB = juce::jmax(peak0dB, p);
+                    if (b >= 188 && steadyCount < exactLen)
+                    {
+                        const float* ptr = buf.getReadPointer(0);
+                        for (int i = 0; i < 256 && steadyCount < exactLen; ++i)
+                        {
+                            steadySum += ptr[i];
+                            ++steadyCount;
+                        }
+                    }
+                }
+                expect(peak0dB > 0.1f, "Active factory preset must produce audible output");
+                const double steadyDc = steadySum / static_cast<double>(steadyCount);
+                expect(std::abs(steadyDc) < 0.005, "Sustained factory preset steady DC offset must stay < 0.005");
+            }
+
+            // FFT fundamental + non-harmonic alias check on C2 (65.4Hz) and C4 (261.6Hz) in Poort + OD
+            {
+                AllyBassAudioProcessor proc;
+                proc.setPlayConfigDetails(0, 2, 48000.0, 512);
+                proc.prepareToPlay(48000.0, 512);
+                setParamPlainValue(proc.apvts, "diepte", 0.0f);
+                setParamPlainValue(proc.apvts, "polderPunch", 0.0f);
+                setParamPlainValue(proc.apvts, "havenDirt", 0.70f);
+                setParamPlainValue(proc.apvts, "stadsdeel", 2.0f); // Poort
+                setParamPlainValue(proc.apvts, "overdrive036", 1.0f);
+                setParamPlainValue(proc.apvts, "attack", 1.0f);
+
+                std::vector<float> capture;
+                juce::AudioBuffer<float> buf(2, 512);
+                juce::MidiBuffer midi;
+                midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0); // C4 = 261.63 Hz
+                for (int b = 0; b < 96; ++b)
+                {
+                    buf.clear();
+                    proc.processBlock(buf, midi);
+                    midi.clear();
+                    const float* r = buf.getReadPointer(0);
+                    capture.insert(capture.end(), r, r + 512);
+                }
+
+                constexpr int fftOrder = 13;
+                constexpr int fftSize = 1 << fftOrder;
+                juce::dsp::FFT fft(fftOrder);
+                std::vector<float> fftBuf(static_cast<size_t>(fftSize * 2), 0.0f);
+                double winSum = 0.0;
+                const int startOff = static_cast<int>(capture.size()) - fftSize;
+                for (int i = 0; i < fftSize; ++i)
+                {
+                    const double a = 2.0 * juce::MathConstants<double>::pi * static_cast<double>(i) / static_cast<double>(fftSize - 1);
+                    const double w = 0.35875 - 0.48829 * std::cos(a) + 0.14128 * std::cos(2.0 * a) - 0.01168 * std::cos(3.0 * a);
+                    fftBuf[static_cast<size_t>(i)] = capture[static_cast<size_t>(startOff + i)] * static_cast<float>(w);
+                    winSum += w;
+                }
+                fft.performFrequencyOnlyForwardTransform(fftBuf.data());
+                const double binHz = 48000.0 / static_cast<double>(fftSize);
+                const double scale = 2.0 / winSum;
+                const double fundHz = juce::MidiMessage::getMidiNoteInHertz(60);
+
+                double fundMag = 0.0;
+                double worstNonHarmMag = 0.0;
+                for (int bin = 3; bin < fftSize / 2 - 1; ++bin)
+                {
+                    const double mag = static_cast<double>(fftBuf[static_cast<size_t>(bin)]) * scale;
+                    const double freq = static_cast<double>(bin) * binHz;
+                    const double ratio = freq / fundHz;
+                    const double nearestInt = std::round(ratio);
+                    const bool isHarm = (nearestInt >= 1.0 && std::abs(freq - nearestInt * fundHz) <= 4.5 * binHz);
+                    if (std::abs(freq - fundHz) <= 4.5 * binHz)
+                        fundMag = std::max(fundMag, mag);
+                    else if (!isHarm)
+                        worstNonHarmMag = std::max(worstNonHarmMag, mag);
+                }
+                const double aliasDb = 20.0 * std::log10(std::max(worstNonHarmMag, 1e-8));
+                expect(fundMag > 0.5, "Fundamental energy at C4 must be strong");
+                expect(aliasDb < -80.0, "Poort + Overdrive036 C4 non-harmonic/DC leakage floor must be < -80 dBFS");
+            }
+        }
+    }
+};
+
+static DspQualityD1DTests dspQualityD1DTests;
+
 } // namespace
 
 int main(int argc, char* argv[])

@@ -211,6 +211,16 @@ void AllyBassAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
 
     velocitySmoothCoeff = 1.0f - std::exp(-1.0f / juce::jmax(1.0f, 0.002f * static_cast<float>(validSr)));
 
+    constexpr double paramRampSeconds = 0.008;
+    smoothedDiepte.reset(validSr, paramRampSeconds);
+    smoothedHavenDirt.reset(validSr, paramRampSeconds);
+    smoothedMasterGain.reset(validSr, paramRampSeconds);
+
+    smoothedDiepte.setCurrentAndTargetValue(loadFiniteParam(rawDiepte, 0.50f, 0.0f, 1.0f));
+    smoothedHavenDirt.setCurrentAndTargetValue(loadFiniteParam(rawHavenDirt, 0.15f, 0.0f, 1.0f));
+    const float initMasterVolDb = loadFiniteParam(rawMasterVolume, 0.0f, -24.0f, 6.0f);
+    smoothedMasterGain.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(initMasterVolDb));
+
     envState = EnvelopeState::Idle;
     envLevel = 0.0f;
     targetVelocity = 1.0f;
@@ -603,6 +613,22 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     updateEnvelopeRates(attackMs, releaseMs);
     waterwijkGlide.updateGlideCoeff(waterwijkGlideMs, waterwijkGlide.getCurrentVelocity());
 
+    const bool isVoiceSilentBeforeBlock =
+        (envState == EnvelopeState::Idle && envLevel <= 1e-6f && !polderTransient.getIsActive());
+
+    if (isVoiceSilentBeforeBlock)
+    {
+        smoothedDiepte.setCurrentAndTargetValue(diepte);
+        smoothedHavenDirt.setCurrentAndTargetValue(havenDirt);
+        smoothedMasterGain.setCurrentAndTargetValue(masterGain);
+    }
+    else
+    {
+        smoothedDiepte.setTargetValue(diepte);
+        smoothedHavenDirt.setTargetValue(havenDirt);
+        smoothedMasterGain.setTargetValue(masterGain);
+    }
+
     auto processGuiNoteEventsAtSampleZero = [&]()
     {
         for (int i = 0; i < numGuiEvents; ++i)
@@ -733,13 +759,15 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         }
 
         const float ampEnv = envLevel * currentVelocityGain;
+        const float sampleDiepte = smoothedDiepte.getNextValue();
+        const float sampleDirt   = smoothedHavenDirt.getNextValue();
         float synthSample = 0.0f;
 
         if (ampEnv > 0.0f || polderTransient.getIsActive())
         {
             // 1. NAP Sub-Oscillator (Clean low Sine/Warm hybrid)
             float subSample = (ampEnv > 0.0f)
-                ? (napSubOsc.processSample(instantFreq, diepte) * ampEnv)
+                ? (napSubOsc.processSample(instantFreq, sampleDiepte) * ampEnv)
                 : 0.0f;
 
             // 2. Click-free Polder Punch transient
@@ -748,7 +776,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
             // 3. Stadsdeel Saturation
             synthSample = stadsdeelSaturation.processSample(
-                synthSample, havenDirt, static_cast<AllyDSP::StadsdeelMode>(stadsdeelIndex));
+                synthSample, sampleDirt, static_cast<AllyDSP::StadsdeelMode>(stadsdeelIndex));
 
             if (!std::isfinite(synthSample))
                 synthSample = 0.0f;
@@ -796,11 +824,11 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     // 6. 1300 MONO LOCK (Strict mono sub < 90Hz)
     monoLockFilter.process(buffer, isMonoLock);
 
-    // 7. Master Output Volume
-    if (std::abs(masterGain - 1.0f) > 0.001f)
-    {
-        buffer.applyGain(masterGain);
-    }
+    // 7. Master Output Volume (per-sample SR-invariant smoothed gain)
+    if (smoothedMasterGain.isSmoothing())
+        smoothedMasterGain.applyGain(buffer, numSamples);
+    else if (std::abs(smoothedMasterGain.getCurrentValue() - 1.0f) > 1e-6f)
+        buffer.applyGain(smoothedMasterGain.getCurrentValue());
 
     // 8. Wait-free triple-buffered post-output telemetry (Scope snapshot + coherent Meter metrics)
     {

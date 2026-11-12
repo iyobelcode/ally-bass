@@ -42,17 +42,22 @@ public:
 
     void prepare(double sampleRate)
     {
-        currentSampleRate = sampleRate;
-        dcBlockerPrevIn = 0.0f;
-        dcBlockerPrevOut = 0.0f;
+        currentSampleRate = sampleRate > 1.0 ? sampleRate : 44100.0;
+        const double twoPi = juce::MathConstants<double>::twoPi;
+        // 5.0 Hz SR-invariant DC blocker preserves 25-80 Hz sub-bass equally across 44.1/48/96 kHz
+        dcBlockCoeff = static_cast<float>(std::exp(-twoPi * 5.0 / currentSampleRate));
+        modeCrossfadeInc = 1.0f / juce::jmax(1.0f, 0.005f * static_cast<float>(currentSampleRate));
         updateFilters();
+        reset();
     }
 
     void reset()
     {
-        dcBlockerPrevIn = 0.0f;
-        dcBlockerPrevOut = 0.0f;
+        havenDc.reset();
+        poortDc.reset();
         buitenFilter.reset();
+        modeFadeProgress = 1.0f;
+        hasActiveMode = false;
     }
 
     void updateFilters()
@@ -67,9 +72,67 @@ public:
 
     float processSample(float input, float drive, StadsdeelMode mode)
     {
-        if (drive <= 0.001f)
-            return input;
+        const float clampedDrive = juce::jlimit(0.0f, 1.0f, drive);
 
+        if (!hasActiveMode)
+        {
+            activeMode = mode;
+            outgoingMode = mode;
+            modeFadeProgress = 1.0f;
+            hasActiveMode = true;
+        }
+        else if (mode != activeMode)
+        {
+            outgoingMode = activeMode;
+            activeMode = mode;
+            modeFadeProgress = 0.0f;
+        }
+
+        if (clampedDrive <= 0.0f && modeFadeProgress >= 1.0f)
+        {
+            havenDc.reset();
+            poortDc.reset();
+            buitenFilter.reset();
+            return input;
+        }
+
+        float shaped = evaluateMode(input, clampedDrive, activeMode);
+        if (modeFadeProgress < 1.0f)
+        {
+            const float prevOut = evaluateMode(input, clampedDrive, outgoingMode);
+            shaped = prevOut + modeFadeProgress * (shaped - prevOut);
+            modeFadeProgress = juce::jmin(1.0f, modeFadeProgress + modeCrossfadeInc);
+        }
+
+        // Smooth wet blend across [0.0 .. 0.015] removes the drive=0.001f threshold click
+        // while keeping all active presets (>= 0.02, incl. De Gouw Earthquake) at 100% wet character.
+        const float wetMix = juce::jlimit(0.0f, 1.0f, clampedDrive / 0.015f);
+        return input + wetMix * (shaped - input);
+    }
+
+private:
+    struct DcBlockerState
+    {
+        float prevIn = 0.0f;
+        float prevOut = 0.0f;
+
+        float process(float x, float r) noexcept
+        {
+            const float y = x - prevIn + r * prevOut;
+            prevIn = x;
+            prevOut = y;
+            return y;
+        }
+
+        void reset() noexcept
+        {
+            prevIn = 0.0f;
+            prevOut = 0.0f;
+        }
+    };
+
+    float evaluateMode(float input, float drive, StadsdeelMode mode)
+    {
         switch (mode)
         {
             case StadsdeelMode::Haven:
@@ -89,7 +152,6 @@ public:
         }
     }
 
-private:
     float processHaven(float x, float drive)
     {
         // Haven (1350): Warm tape & tube saturation
@@ -98,11 +160,7 @@ private:
         float xBiased = x + 0.18f * (x * x) - 0.05f * (x * x * x);
         float saturated = std::tanh(driveGain * xBiased);
 
-        // DC Blocker filter: y[n] = x[n] - x[n-1] + R * y[n-1]
-        const float R = 0.995f;
-        float dcCleaned = saturated - dcBlockerPrevIn + R * dcBlockerPrevOut;
-        dcBlockerPrevIn = saturated;
-        dcBlockerPrevOut = dcCleaned;
+        float dcCleaned = havenDc.process(saturated, dcBlockCoeff);
 
         // Warm level compensation
         float makeup = 1.0f / std::sqrt(driveGain);
@@ -140,8 +198,9 @@ private:
         float exciter = chebyshev2nd * (drive * 0.15f);
         float combined = cleanSub + exciter;
 
-        // Soft limit peak
-        return std::tanh(combined * 1.1f) * 0.95f;
+        // Soft limit peak and strip unipolar x^2 DC component cleanly
+        float limited = std::tanh(combined * 1.1f) * 0.95f;
+        return poortDc.process(limited, dcBlockCoeff);
     }
 
     float processBuiten(float x, float drive)
@@ -161,8 +220,15 @@ private:
     }
 
     double currentSampleRate = 44100.0;
-    float dcBlockerPrevIn = 0.0f;
-    float dcBlockerPrevOut = 0.0f;
+    float dcBlockCoeff = 0.9993f;
+    float modeCrossfadeInc = 0.004f;
+    float modeFadeProgress = 1.0f;
+    StadsdeelMode activeMode = StadsdeelMode::Haven;
+    StadsdeelMode outgoingMode = StadsdeelMode::Haven;
+    bool hasActiveMode = false;
+
+    DcBlockerState havenDc;
+    DcBlockerState poortDc;
     juce::dsp::IIR::Filter<float> buitenFilter;
 };
 

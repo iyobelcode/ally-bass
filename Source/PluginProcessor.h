@@ -172,6 +172,11 @@ private:
     // Low-pass filter to tame harsh highs
     juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>> masterLowPass;
 
+    // Sample-rate-invariant parameter smoothers (prevents zipper/step clicks on automation)
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedDiepte;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedHavenDirt;
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> smoothedMasterGain;
+
     // Normalized [0..1] Envelope Generator (Attack - Sustain - Release) + decoupled smoothed velocity gain
     enum class EnvelopeState { Idle, Attack, Sustain, Release };
     EnvelopeState envState = EnvelopeState::Idle;
