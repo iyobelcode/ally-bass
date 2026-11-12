@@ -196,7 +196,6 @@ void AllyBassAudioProcessor::updateEnvelopeRates(float attackMs, float releaseMs
 
 void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, float attackMs, float punchAmount)
 {
-    juce::ignoreUnused(punchAmount);
     if (message.isNoteOn())
     {
         float glideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
@@ -212,8 +211,9 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
         float attackSamples = attackSec * static_cast<float>(sr);
         attackRate = juce::jmax(0.00001f, (targetVelocity - envLevel) / attackSamples);
 
-        // Geen harde transient trigger om klikjes/tikken te voorkomen; punch module blijft zuiver
-        polderTransient.reset();
+        // Trigger Polder Punch alleen bij nieuwe aanslag vanuit stilte (niet bij legato slide)
+        if (waterwijkGlide.popTransientTrigger())
+            polderTransient.trigger(vel, punchAmount);
     }
     else if (message.isNoteOff())
     {
@@ -227,6 +227,7 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
     else if (message.isAllNotesOff() || message.isAllSoundOff())
     {
         waterwijkGlide.reset();
+        polderTransient.reset();
         envState = EnvelopeState::Idle;
         envLevel = 0.0f;
     }
@@ -318,15 +319,18 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
         float synthSample = 0.0f;
 
-        if (envLevel > 0.0001f)
+        if (envLevel > 0.0001f || polderTransient.getIsActive())
         {
             // 1. NAP Sub-Oscillator (Clean low Sine/Warm hybrid)
-            float subWave = napSubOsc.processSample(instantFreq, diepte);
+            float subSample = (envLevel > 0.0001f)
+                ? (napSubOsc.processSample(instantFreq, diepte) * envLevel)
+                : 0.0f;
 
-            // Combine sub core met smoothed envelope
-            synthSample = subWave * envLevel;
+            // 2. Click-free Polder Punch transient
+            float punchSample = polderTransient.processSample(polderPunch);
+            synthSample = subSample + punchSample;
 
-            // 2. Stadsdeel Saturation
+            // 3. Stadsdeel Saturation
             synthSample = stadsdeelSaturation.processSample(
                 synthSample, havenDirt, static_cast<AllyDSP::StadsdeelMode>(stadsdeelIndex));
         }
