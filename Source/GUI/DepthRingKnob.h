@@ -17,6 +17,7 @@ struct DepthRingConfig
     EngineeredDepthIcons::IconId icon = EngineeredDepthIcons::IconId::None;
     int valueDecimals = 2;
     std::function<juce::String(double)> valueFormatter;
+    bool compact = false;
 };
 
 /**

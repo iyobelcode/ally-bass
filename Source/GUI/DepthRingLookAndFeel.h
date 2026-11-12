@@ -20,12 +20,14 @@ public:
     DepthRingLookAndFeel() = default;
     ~DepthRingLookAndFeel() override = default;
 
-    static constexpr const char* themePropertyId = "allyDepthTheme";
-    static constexpr const char* iconPropertyId  = "allyDepthIcon";
+    static constexpr const char* themePropertyId   = "allyDepthTheme";
+    static constexpr const char* iconPropertyId    = "allyDepthIcon";
+    static constexpr const char* compactPropertyId = "allyDepthCompact";
 
     static void configureSlider(juce::Slider& slider,
                                 EngineeredDepthTheme::AccentTheme theme,
-                                EngineeredDepthIcons::IconId icon);
+                                EngineeredDepthIcons::IconId icon,
+                                bool compact = false);
 
     static EngineeredDepthTheme::ControlState inspectSliderState(const juce::Slider& slider,
                                                                    float normalizedValue);

@@ -12,13 +12,13 @@ DepthRingKnob::DepthRingKnob(const DepthRingConfig& cfg, juce::AudioProcessorVal
     slider.setRotaryParameters(juce::MathConstants<float>::pi * 1.25f,
                                juce::MathConstants<float>::pi * 2.75f,
                                true);
-    slider.setMouseDragSensitivity(200);
+    slider.setMouseDragSensitivity(config.compact ? 140 : 200);
     slider.setName(config.paramId);
     slider.setTitle(config.title);
     slider.setDescription(config.title + " Depth Ring");
     slider.setWantsKeyboardFocus(true);
 
-    DepthRingLookAndFeel::configureSlider(slider, config.theme, config.icon);
+    DepthRingLookAndFeel::configureSlider(slider, config.theme, config.icon, config.compact);
     slider.setLookAndFeel(&lookAndFeel);
     addAndMakeVisible(slider);
 
@@ -92,6 +92,41 @@ void DepthRingKnob::updateFormattedValue()
 
 void DepthRingKnob::resized()
 {
+    if (config.compact)
+    {
+        const auto inner = getLocalBounds().toFloat().reduced(1.0f);
+        if (inner.getWidth() < 32.0f || inner.getHeight() < 40.0f)
+        {
+            titleBounds = {};
+            pillBounds = {};
+            dialBounds = {};
+            readoutBounds = {};
+            slider.setBounds(0, 0, 0, 0);
+            return;
+        }
+
+        const float titleH    = juce::jlimit(10.0f, 15.0f, inner.getHeight() * 0.215f);
+        const float readoutH  = juce::jlimit(10.5f, 16.0f, inner.getHeight() * 0.220f);
+        const float topGap    = juce::jlimit(1.0f, 3.0f, inner.getHeight() * 0.025f);
+        const float botGap    = juce::jlimit(1.0f, 3.5f, inner.getHeight() * 0.035f);
+        const float availH    = juce::jmax(22.0f, inner.getHeight() - titleH - topGap - botGap - readoutH);
+        const float availW    = juce::jmax(22.0f, inner.getWidth() * 0.88f);
+        const float dialSize  = juce::jlimit(22.0f, 44.0f, juce::jmin(availH, availW));
+
+        const float totalH = titleH + topGap + dialSize + botGap + readoutH;
+        const float startY = inner.getY() + juce::jmax(0.0f, (inner.getHeight() - totalH) * 0.5f);
+        const float cx     = inner.getCentreX();
+
+        titleBounds   = { inner.getX(), startY, inner.getWidth(), titleH };
+        pillBounds    = {};
+        dialBounds    = juce::Rectangle<float>(dialSize, dialSize)
+                            .withCentre({ cx, startY + titleH + topGap + dialSize * 0.5f });
+        readoutBounds = { inner.getX(), dialBounds.getBottom() + botGap, inner.getWidth(), readoutH };
+
+        slider.setBounds(dialBounds.toNearestInt());
+        return;
+    }
+
     const auto inner = getLocalBounds().toFloat().reduced(2.0f);
     if (inner.getWidth() < 40.0f || inner.getHeight() < 56.0f)
     {
@@ -153,8 +188,11 @@ void DepthRingKnob::paint(juce::Graphics& g)
     }
 
     // 2. Centered uppercase parameter label (with subtle dark contrast backdrop for metallic legibility)
-    const float titleFontPx = juce::jlimit(9.5f, 18.5f, dialSize * 0.095f);
+    const float titleFontPx = config.compact
+        ? juce::jlimit(8.5f, 12.2f, dialSize * 0.305f)
+        : juce::jlimit(9.5f, 18.5f, dialSize * 0.095f);
     const auto titleFont = EngineeredDepthTheme::makeUiFont(titleFontPx, false);
+    const float titleTrack = config.compact ? 0.075f : 0.095f;
     const auto titleColour = state.enabled
         ? (state.hovered || state.dragging ? EngineeredDepthTheme::Colors::textPrimary
                                            : EngineeredDepthTheme::Colors::textPrimary.withAlpha(0.95f))
@@ -167,7 +205,7 @@ void DepthRingKnob::paint(juce::Graphics& g)
                                               titleBounds.translated(0.0f, 0.8f),
                                               titleFont,
                                               EngineeredDepthTheme::Colors::black.withAlpha(0.65f),
-                                              0.095f,
+                                              titleTrack,
                                               juce::Justification::centred);
     }
 
@@ -176,8 +214,37 @@ void DepthRingKnob::paint(juce::Graphics& g)
                                           titleBounds,
                                           titleFont,
                                           titleColour,
-                                          0.095f,
+                                          titleTrack,
                                           juce::Justification::centred);
+
+    if (config.compact)
+    {
+        // Compact Mini Depth Rings omit the status pill & brackets to match the Secondary DSP bar
+        const float valueFontPx = juce::jlimit(8.5f, 12.8f, dialSize * 0.31f);
+        const auto valCol = (state.hovered || state.dragging)
+            ? palette.textValue.interpolatedWith(palette.coreHighlight, 0.25f)
+            : palette.textValue;
+
+        if (state.enabled)
+        {
+            EngineeredDepthTheme::drawTrackedText(g,
+                                                  formattedValue,
+                                                  readoutBounds.translated(0.0f, 0.6f),
+                                                  EngineeredDepthTheme::makeDataFont(valueFontPx, false),
+                                                  EngineeredDepthTheme::Colors::black.withAlpha(0.55f),
+                                                  0.025f,
+                                                  juce::Justification::centred);
+        }
+
+        EngineeredDepthTheme::drawTrackedText(g,
+                                              formattedValue,
+                                              readoutBounds,
+                                              EngineeredDepthTheme::makeDataFont(valueFontPx, false),
+                                              valCol,
+                                              0.025f,
+                                              juce::Justification::centred);
+        return;
+    }
 
     // 3. Glowing accent pill indicator beneath title
     const float pillGlow = state.enabled ? (state.dragging ? 0.34f : (state.hovered ? 0.28f : 0.20f)) : 0.0f;

@@ -6,6 +6,7 @@
 #include "PluginProcessor.h"
 #include "GUI/BrutalistLookAndFeel.h"
 #include "GUI/PrimaryKnobsPanel.h"
+#include "GUI/SecondaryDspPanel.h"
 #include "GUI/NapWaveVisualizer.h"
 #include "GUI/HeavyKnob.h"
 #include "GUI/BrutalistToggle.h"
@@ -47,18 +48,8 @@ private:
     // The 5 Big Primary Knobs in the shared Engineered Depth chassis (Stap C.2)
     std::unique_ptr<AllyGUI::PrimaryKnobsPanel> primaryKnobsPanel;
 
-    // The 2 Compact Knobs (Attack & Release)
-    std::unique_ptr<AllyGUI::HeavyKnob> knobAttack;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobRelease;
-
-    // Stadsdeel Mode Selector
-    juce::Label stadsdeelLabel;
-    juce::ComboBox stadsdeelBox;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> stadsdeelAttachment;
-
-    // 2 Master Switches
-    std::unique_ptr<AllyGUI::BrutalistToggle> toggleOverdrive036;
-    std::unique_ptr<AllyGUI::BrutalistToggle> toggleMonoLock1300;
+    // Secondary DSP console bar: Stadsdeel DSP, Attack & Release Mini Rings, 036 Overdrive, 1300 Mono Lock (Stap C.3)
+    std::unique_ptr<AllyGUI::SecondaryDspPanel> secondaryDspPanel;
 
     // Preset Selector
     juce::Label presetLabel;

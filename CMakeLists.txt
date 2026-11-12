@@ -62,6 +62,12 @@ set(ALLY_SHARED_SOURCES
     Source/GUI/DepthRingKnob.cpp
     Source/GUI/PrimaryKnobsPanel.h
     Source/GUI/PrimaryKnobsPanel.cpp
+    Source/GUI/EngineeredDepthComboBox.h
+    Source/GUI/EngineeredDepthComboBox.cpp
+    Source/GUI/EngineeredDepthToggle.h
+    Source/GUI/EngineeredDepthToggle.cpp
+    Source/GUI/SecondaryDspPanel.h
+    Source/GUI/SecondaryDspPanel.cpp
     Source/GUI/NapWaveVisualizer.h
     Source/GUI/NapWaveVisualizer.cpp
     Source/GUI/HeavyKnob.h

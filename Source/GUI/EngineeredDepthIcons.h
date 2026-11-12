@@ -20,7 +20,9 @@ struct EngineeredDepthIcons
         PolderPunch,
         HavenDirt,
         WaterwijkGlide,
-        OutputBars
+        OutputBars,
+        StadsdeelDsp,
+        ChevronDown
     };
 
     /** Returns normalized vector geometry in viewBox space and its reference bounds. */

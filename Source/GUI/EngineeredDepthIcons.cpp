@@ -80,6 +80,32 @@ juce::Path EngineeredDepthIcons::buildStrokePath(IconId icon, juce::Rectangle<fl
             path.addRoundedRectangle(19.8f, 2.4f,  2.8f, 13.6f, 0.55f);
             break;
 
+        case IconId::StadsdeelDsp:
+            // Matches Phase 5 stadsdeel_dsp.svg skyline contour with closed base line
+            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
+            path.startNewSubPath(2.0f, 20.0f);
+            path.lineTo(2.0f, 12.0f);
+            path.lineTo(7.0f, 12.0f);
+            path.lineTo(7.0f, 5.0f);
+            path.lineTo(11.0f, 5.0f);
+            path.lineTo(11.0f, 17.0f);
+            path.lineTo(14.0f, 17.0f);
+            path.lineTo(14.0f, 3.0f);
+            path.lineTo(19.0f, 3.0f);
+            path.lineTo(19.0f, 10.0f);
+            path.lineTo(22.0f, 10.0f);
+            path.lineTo(22.0f, 20.0f);
+            path.lineTo(2.0f, 20.0f);
+            break;
+
+        case IconId::ChevronDown:
+            // Matches Phase 5 chevron_down.svg (5,8.5 -> 12,15.5 -> 19,8.5)
+            outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
+            path.startNewSubPath(5.0f, 8.5f);
+            path.lineTo(12.0f, 15.5f);
+            path.lineTo(19.0f, 8.5f);
+            break;
+
         case IconId::None:
         default:
             outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
@@ -197,6 +223,14 @@ void EngineeredDepthIcons::drawIcon(juce::Graphics& g,
 
     g.setColour(primaryColour);
     g.strokePath(path, stroke, viewTransform);
+
+    if (icon == IconId::StadsdeelDsp)
+    {
+        auto dotCentre = juce::Point<float>(12.0f, 20.0f).transformedBy(viewTransform);
+        const float dotR = juce::jmax(1.0f, strokeThickness * 0.95f);
+        g.setColour(secondaryColour);
+        g.fillEllipse(dotCentre.x - dotR, dotCentre.y - dotR, dotR * 2.0f, dotR * 2.0f);
+    }
 }
 
 } // namespace AllyGUI

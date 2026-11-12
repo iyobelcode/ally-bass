@@ -5,10 +5,12 @@ namespace AllyGUI
 
 void DepthRingLookAndFeel::configureSlider(juce::Slider& slider,
                                            EngineeredDepthTheme::AccentTheme theme,
-                                           EngineeredDepthIcons::IconId icon)
+                                           EngineeredDepthIcons::IconId icon,
+                                           bool compact)
 {
     slider.getProperties().set(themePropertyId, static_cast<int>(theme));
     slider.getProperties().set(iconPropertyId, static_cast<int>(icon));
+    slider.getProperties().set(compactPropertyId, compact);
 }
 
 EngineeredDepthTheme::ControlState DepthRingLookAndFeel::inspectSliderState(const juce::Slider& slider,
@@ -46,6 +48,7 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
 
     const auto theme = static_cast<EngineeredDepthTheme::AccentTheme>(themeVal);
     const auto icon  = static_cast<EngineeredDepthIcons::IconId>(iconVal);
+    const bool isCompact = static_cast<bool>(slider.getProperties().getWithDefault(compactPropertyId, false));
     const float norm = juce::jlimit(0.0f, 1.0f, sliderPosProportional);
     const auto state = inspectSliderState(slider, norm);
     const auto palette = EngineeredDepthTheme::resolveAccent(theme, state);
@@ -56,68 +59,73 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
     const float rTickOuterMajor = 0.488f * diameter;
     const float rTickOuterMinor = 0.468f * diameter;
     const float rTickInner      = 0.450f * diameter;
-    const float rWell           = 0.440f * diameter;
-    const float rArc            = 0.422f * diameter;
-    const float rMetalOuter     = 0.404f * diameter;
-    const float rBevelInner     = 0.366f * diameter;
-    const float rDishOuter      = 0.363f * diameter;
-    const float rCapInner       = 0.268f * diameter;
+    const float rWell           = (isCompact ? 0.482f : 0.440f) * diameter;
+    const float rArc            = (isCompact ? 0.436f : 0.422f) * diameter;
+    const float rMetalOuter     = (isCompact ? 0.398f : 0.404f) * diameter;
+    const float rBevelInner     = (isCompact ? 0.348f : 0.366f) * diameter;
+    const float rDishOuter      = (isCompact ? 0.343f : 0.363f) * diameter;
+    const float rCapInner       = (isCompact ? 0.242f : 0.268f) * diameter;
     const float rPointerOuter   = 0.382f * diameter;
     const float rPointerInner   = 0.145f * diameter;
 
-    const float arcStroke = juce::jmax(2.6f, 0.031f * diameter);
+    const float arcStroke = isCompact
+        ? juce::jmax(2.2f, 0.088f * diameter)
+        : juce::jmax(2.6f, 0.031f * diameter);
 
     // 1. Dark circular recessed well behind arc and metallic bezel (subtle machined edge, no black void)
     g.setColour(EngineeredDepthTheme::Colors::dialWell);
     g.fillEllipse(centre.x - rWell, centre.y - rWell, rWell * 2.0f, rWell * 2.0f);
     g.setColour(EngineeredDepthTheme::Colors::trackDark.withAlpha(0.45f));
     g.drawEllipse(centre.x - rWell, centre.y - rWell, rWell * 2.0f, rWell * 2.0f,
-                  juce::jmax(0.8f, 0.0045f * diameter));
+                  juce::jmax(0.8f, (isCompact ? 0.014f : 0.0045f) * diameter));
 
-    // 2. Outer technical scale ticks: 24 intervals (11.25 deg), major ticks every 22.5 deg
-    constexpr int numSteps = 24;
-    const float majorTickWidth = juce::jmax(1.1f, 0.0085f * diameter);
-    const float minorTickWidth = juce::jmax(0.8f, 0.0055f * diameter);
-
-    for (int i = 1; i < numSteps; ++i)
+    // 2. Outer technical scale ticks: 24 intervals on full rings; omitted on Mini Depth Rings for clarity
+    if (!isCompact)
     {
-        const float t = static_cast<float>(i) / static_cast<float>(numSteps);
-        const float angle = rotaryStartAngle + t * (rotaryEndAngle - rotaryStartAngle);
-        const bool isMajor = (i % 2 == 0);
-        const bool underActiveArc = state.active && (angle <= currentAngle + 0.015f);
+        constexpr int numSteps = 24;
+        const float majorTickWidth = juce::jmax(1.1f, 0.0085f * diameter);
+        const float minorTickWidth = juce::jmax(0.8f, 0.0055f * diameter);
 
-        const float sinA = std::sin(angle);
-        const float cosA = -std::cos(angle);
-        const float outerR = isMajor ? rTickOuterMajor : rTickOuterMinor;
-
-        const float x1 = centre.x + rTickInner * sinA;
-        const float y1 = centre.y + rTickInner * cosA;
-        const float x2 = centre.x + outerR * sinA;
-        const float y2 = centre.y + outerR * cosA;
-
-        juce::Colour tickCol;
-        if (!state.enabled)
+        for (int i = 1; i < numSteps; ++i)
         {
-            tickCol = EngineeredDepthTheme::Colors::disabled.withAlpha(isMajor ? 0.50f : 0.28f);
-        }
-        else if (isMajor)
-        {
-            const float hoverLift = (state.hovered || state.dragging) ? 0.12f : 0.0f;
-            const bool isCardinal9 = (i == 4);
-            if (isCardinal9 && underActiveArc)
-                tickCol = palette.primary.withAlpha(0.90f);
+            const float t = static_cast<float>(i) / static_cast<float>(numSteps);
+            const float angle = rotaryStartAngle + t * (rotaryEndAngle - rotaryStartAngle);
+            const bool isMajor = (i % 2 == 0);
+            const bool underActiveArc = state.active && (angle <= currentAngle + 0.015f);
+
+            const float sinA = std::sin(angle);
+            const float cosA = -std::cos(angle);
+            const float outerR = isMajor ? rTickOuterMajor : rTickOuterMinor;
+
+            const float x1 = centre.x + rTickInner * sinA;
+            const float y1 = centre.y + rTickInner * cosA;
+            const float x2 = centre.x + outerR * sinA;
+            const float y2 = centre.y + outerR * cosA;
+
+            juce::Colour tickCol;
+            if (!state.enabled)
+            {
+                tickCol = EngineeredDepthTheme::Colors::disabled.withAlpha(isMajor ? 0.50f : 0.28f);
+            }
+            else if (isMajor)
+            {
+                const float hoverLift = (state.hovered || state.dragging) ? 0.12f : 0.0f;
+                const bool isCardinal9 = (i == 4);
+                if (isCardinal9 && underActiveArc)
+                    tickCol = palette.primary.withAlpha(0.90f);
+                else
+                    tickCol = EngineeredDepthTheme::Colors::tickMajor.withAlpha(juce::jmin(1.0f, 0.84f + hoverLift));
+            }
             else
-                tickCol = EngineeredDepthTheme::Colors::tickMajor.withAlpha(juce::jmin(1.0f, 0.84f + hoverLift));
-        }
-        else
-        {
-            tickCol = underActiveArc
-                ? palette.dim.withAlpha(state.hovered ? 0.78f : 0.62f)
-                : EngineeredDepthTheme::Colors::tickMinorDim.withAlpha(state.hovered ? 0.85f : 0.65f);
-        }
+            {
+                tickCol = underActiveArc
+                    ? palette.dim.withAlpha(state.hovered ? 0.78f : 0.62f)
+                    : EngineeredDepthTheme::Colors::tickMinorDim.withAlpha(state.hovered ? 0.85f : 0.65f);
+            }
 
-        g.setColour(tickCol);
-        g.drawLine(x1, y1, x2, y2, isMajor ? majorTickWidth : minorTickWidth);
+            g.setColour(tickCol);
+            g.drawLine(x1, y1, x2, y2, isMajor ? majorTickWidth : minorTickWidth);
+        }
     }
 
     // 3. Inactive arc track groove
@@ -183,7 +191,9 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
         g.fillEllipse(rimBounds);
 
         // Soft machined outer contour so bottom bevel integrates with track groove
-        const float rimStroke = juce::jmax(1.0f, 0.0070f * diameter);
+        const float rimStroke = isCompact
+            ? juce::jmax(0.85f, 0.018f * diameter)
+            : juce::jmax(1.0f, 0.0070f * diameter);
         g.setColour(EngineeredDepthTheme::Colors::metalRimMid.withAlpha(0.32f));
         g.drawEllipse(rimBounds.reduced(rimStroke * 0.4f), rimStroke * 0.85f);
 
@@ -237,8 +247,9 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
         g.setGradientFill(dishGrad);
         g.fillEllipse(dishBounds);
 
-        // Delicate upper bevel highlight on dish edge
-        g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(state.hovered ? 0.44f : 0.28f));
+        // Delicate upper bevel highlight on dish edge (softened on Mini Depth Rings for sleek dark center)
+        const float dishStrokeAlpha = isCompact ? (state.hovered ? 0.28f : 0.16f) : (state.hovered ? 0.44f : 0.28f);
+        g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(dishStrokeAlpha));
         g.drawEllipse(dishBounds.reduced(0.5f), juce::jmax(0.8f, 0.0055f * diameter));
 
         // Inner circular step cap
@@ -254,7 +265,8 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
         g.setGradientFill(capGrad);
         g.fillEllipse(capBounds);
 
-        g.setColour(EngineeredDepthTheme::Colors::capStroke.withAlpha(state.hovered ? 0.84f : 0.62f));
+        const float capStrokeAlpha = isCompact ? (state.hovered ? 0.36f : 0.22f) : (state.hovered ? 0.84f : 0.62f);
+        g.setColour(EngineeredDepthTheme::Colors::capStroke.withAlpha(capStrokeAlpha));
         g.drawEllipse(capBounds, juce::jmax(0.8f, 0.005f * diameter));
     }
 
@@ -286,7 +298,9 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
 
     // 8. Luminous indicator needle bar (outer rim inward toward center)
     {
-        const float pointerW = juce::jmax(2.4f, 0.024f * diameter);
+        const float pointerW = isCompact
+            ? juce::jmax(1.6f, 0.056f * diameter)
+            : juce::jmax(2.4f, 0.024f * diameter);
         const float pointerLen = rPointerOuter - rPointerInner;
         const float pointerRadius = pointerW * 0.45f;
         const auto transform = juce::AffineTransform::rotation(currentAngle, 0.0f, 0.0f)

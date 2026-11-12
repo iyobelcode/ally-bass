@@ -8,10 +8,14 @@
 #include "DSP/WaterwijkGlide.h"
 #include "DSP/PolderTransient.h"
 #include "GUI/DepthRingKnob.h"
+#include "GUI/EngineeredDepthComboBox.h"
 #include "GUI/EngineeredDepthIcons.h"
 #include "GUI/EngineeredDepthTheme.h"
+#include "GUI/EngineeredDepthToggle.h"
+#include "GUI/BrutalistToggle.h"
 #include "GUI/HeavyKnob.h"
 #include "GUI/PrimaryKnobsPanel.h"
+#include "GUI/SecondaryDspPanel.h"
 
 #include <cmath>
 #include <vector>
@@ -920,7 +924,9 @@ public:
                 AllyGUI::EngineeredDepthIcons::IconId::PolderPunch,
                 AllyGUI::EngineeredDepthIcons::IconId::HavenDirt,
                 AllyGUI::EngineeredDepthIcons::IconId::WaterwijkGlide,
-                AllyGUI::EngineeredDepthIcons::IconId::OutputBars
+                AllyGUI::EngineeredDepthIcons::IconId::OutputBars,
+                AllyGUI::EngineeredDepthIcons::IconId::StadsdeelDsp,
+                AllyGUI::EngineeredDepthIcons::IconId::ChevronDown
             };
             for (const auto icon : icons)
             {
@@ -943,9 +949,9 @@ public:
                 auto* panel = findChildOfType<AllyGUI::PrimaryKnobsPanel>(*editor);
                 expect(panel != nullptr, "PrimaryKnobsPanel must exist inside editor");
 
-                // Legacy compact knobs Attack & Release must remain intact outside the primary panel
-                expect(findSliderByName(*editor, "attack") != nullptr, "Attack knob must remain");
-                expect(findSliderByName(*editor, "release") != nullptr, "Release knob must remain");
+                // Compact Mini Depth Rings Attack & Release remain wired outside PrimaryKnobsPanel
+                expect(findSliderByName(*editor, "attack") != nullptr, "Attack Mini Depth Ring must exist");
+                expect(findSliderByName(*editor, "release") != nullptr, "Release Mini Depth Ring must exist");
 
                 if (panel != nullptr)
                 {
@@ -1214,6 +1220,229 @@ public:
                         const auto emptyCheck = juce::Image(juce::Image::ARGB, scaled.getWidth(), scaled.getHeight(), true);
                         expect(imageDiffRms(scaled, emptyCheck) > 0.02,
                                "HiDPI scaled PrimaryKnobsPanel render must draw non-empty content");
+                    }
+                }
+            }
+        }
+
+        beginTest("SecondaryDspPanel hosts STADSDEEL DSP, ATTACK/RELEASE Mini Depth Rings, 036 OVERDRIVE, and 1300 MONO LOCK with full APVTS, DSP, state, and responsive layout");
+        {
+            AllyBassAudioProcessor proc;
+            std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditor());
+            expect(editor != nullptr, "Editor must be created");
+
+            if (editor != nullptr)
+            {
+                auto* primaryPanel   = findChildOfType<AllyGUI::PrimaryKnobsPanel>(*editor);
+                auto* secondaryPanel = findChildOfType<AllyGUI::SecondaryDspPanel>(*editor);
+                expect(primaryPanel != nullptr, "PrimaryKnobsPanel must exist");
+                expect(secondaryPanel != nullptr, "SecondaryDspPanel must exist inside editor");
+                expect(findChildOfType<AllyGUI::HeavyKnob>(*editor) == nullptr,
+                       "All legacy HeavyKnob widgets must be replaced by DepthRingKnob");
+                expect(findChildOfType<AllyGUI::BrutalistToggle>(*editor) == nullptr,
+                       "Legacy BrutalistToggle widgets must be replaced by EngineeredDepthToggle");
+
+                if (primaryPanel != nullptr && secondaryPanel != nullptr)
+                {
+                    auto* stadsdeelCtrl = secondaryPanel->getStadsdeelControl();
+                    auto* attackKnob    = secondaryPanel->getAttackKnob();
+                    auto* releaseKnob   = secondaryPanel->getReleaseKnob();
+                    auto* overdriveTog  = secondaryPanel->getOverdriveToggle();
+                    auto* monoTog       = secondaryPanel->getMonoLockToggle();
+
+                    expect(stadsdeelCtrl != nullptr, "STADSDEEL DSP selector must exist");
+                    expect(attackKnob != nullptr, "ATTACK Mini Depth Ring must exist");
+                    expect(releaseKnob != nullptr, "RELEASE Mini Depth Ring must exist");
+                    expect(overdriveTog != nullptr, "036 OVERDRIVE toggle must exist");
+                    expect(monoTog != nullptr, "1300 MONO LOCK toggle must exist");
+
+                    if (stadsdeelCtrl != nullptr && attackKnob != nullptr && releaseKnob != nullptr
+                        && overdriveTog != nullptr && monoTog != nullptr)
+                    {
+                        // 1. Component names & STADSDEEL modes preserved
+                        auto& combo = stadsdeelCtrl->getComboBox();
+                        expectEquals(combo.getName(), juce::String("stadsdeel"));
+                        expectEquals(combo.getNumItems(), 4);
+                        expectEquals(combo.getItemText(0), juce::String("Haven (1350) - Tape/Tube"));
+                        expectEquals(combo.getItemText(1), juce::String("Centrum (1315) - Hard Clip"));
+                        expectEquals(combo.getItemText(2), juce::String("Poort (1363) - Clean Exciter"));
+                        expectEquals(combo.getItemText(3), juce::String("Buiten (1330) - Foldback"));
+                        expectEquals(combo.getSelectedId(), 2); // Default index 1 (Centrum 1315)
+
+                        // Bidirectional sync: ComboBox <-> APVTS
+                        combo.setSelectedId(4, juce::sendNotificationSync);
+                        expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "stadsdeel"), 3.0f, 1e-4f);
+                        setParamPlainValue(proc.apvts, "stadsdeel", 0.0f);
+                        expectEquals(combo.getSelectedId(), 1);
+                        setParamPlainValue(proc.apvts, "stadsdeel", 1.0f);
+                        expectEquals(combo.getSelectedId(), 2);
+
+                        // 2. Mini Depth Rings: ATTACK & RELEASE own ranges, formatting, drag, double-click reset
+                        expectEquals(attackKnob->getSlider().getName(), juce::String("attack"));
+                        expectEquals(releaseKnob->getSlider().getName(), juce::String("release"));
+                        expect(attackKnob->getPillBounds().isEmpty(), "Compact Mini Depth Ring must omit top pill");
+                        expect(releaseKnob->getPillBounds().isEmpty(), "Compact Mini Depth Ring must omit top pill");
+
+                        expectWithinAbsoluteError(static_cast<float>(attackKnob->getSlider().getMinimum()), 1.0f, 1e-4f);
+                        expectWithinAbsoluteError(static_cast<float>(attackKnob->getSlider().getMaximum()), 300.0f, 1e-4f);
+                        expectWithinAbsoluteError(static_cast<float>(releaseKnob->getSlider().getMinimum()), 10.0f, 1e-4f);
+                        expectWithinAbsoluteError(static_cast<float>(releaseKnob->getSlider().getMaximum()), 3000.0f, 1e-4f);
+
+                        expectEquals(attackKnob->getFormattedValueText(), juce::String("8.0 ms"));
+                        expectEquals(releaseKnob->getFormattedValueText(), juce::String("250.0 ms"));
+                        expect(!attackKnob->getFormattedValueText().contains("["), "Mini ring readout must omit brackets");
+                        expect(!releaseKnob->getFormattedValueText().contains("["), "Mini ring readout must omit brackets");
+
+                        // Automation -> Mini ring -> APVTS & Double-click reset to own defaults
+                        setParamPlainValue(proc.apvts, "attack", 42.5f);
+                        expectWithinAbsoluteError(static_cast<float>(attackKnob->getSlider().getValue()), 42.5f, 0.15f);
+                        expectEquals(attackKnob->getFormattedValueText(), juce::String("42.5 ms"));
+
+                        setParamPlainValue(proc.apvts, "release", 820.0f);
+                        expectWithinAbsoluteError(static_cast<float>(releaseKnob->getSlider().getValue()), 820.0f, 1.1f);
+                        expectEquals(releaseKnob->getFormattedValueText(), juce::String("820.0 ms"));
+
+                        // Check attack APVTS down to 1 ms still preserves existing DSP behavior without modifying DSP
+                        setParamPlainValue(proc.apvts, "attack", 1.0f);
+                        expectEquals(attackKnob->getFormattedValueText(), juce::String("1.0 ms"));
+                        const auto source = juce::Desktop::getInstance().getMainMouseSource();
+                        const auto now = juce::Time::getCurrentTime();
+                        const auto atkCentre = attackKnob->getSlider().getLocalBounds().getCentre().toFloat();
+                        const auto relCentre = releaseKnob->getSlider().getLocalBounds().getCentre().toFloat();
+                        attackKnob->getSlider().mouseDoubleClick(juce::MouseEvent(
+                            source, atkCentre, juce::ModifierKeys(), 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                            &attackKnob->getSlider(), &attackKnob->getSlider(), now, atkCentre, now, 2, false));
+                        releaseKnob->getSlider().mouseDoubleClick(juce::MouseEvent(
+                            source, relCentre, juce::ModifierKeys(), 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                            &releaseKnob->getSlider(), &releaseKnob->getSlider(), now, relCentre, now, 2, false));
+                        expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "attack"), 8.0f, 1e-2f);
+                        expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "release"), 250.0f, 1e-2f);
+
+                        // 3. Hardware LED toggles: 036 OVERDRIVE (red) & 1300 MONO LOCK (cyan)
+                        auto& odBtn   = overdriveTog->getButton();
+                        auto& monoBtn = monoTog->getButton();
+                        expectEquals(odBtn.getName(), juce::String("036_overdrive"));
+                        expectEquals(monoBtn.getName(), juce::String("mono_lock"));
+                        expect(!odBtn.getToggleState(), "036 OVERDRIVE default must be OFF");
+                        expect(monoBtn.getToggleState(), "1300 MONO LOCK default must be ON");
+
+                        // Toggle ON/OFF visual & APVTS checks
+                        const auto odOffImg = renderAtScale(*overdriveTog, 1.0f);
+                        odBtn.setToggleState(true, juce::sendNotificationSync);
+                        expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "overdrive036"), 1.0f, 1e-4f);
+                        const auto odOnImg = renderAtScale(*overdriveTog, 1.0f);
+                        expect(imageDiffRms(odOffImg, odOnImg) > 0.025,
+                               "036 OVERDRIVE ON vs OFF visuals must differ clearly");
+
+                        overdriveTog->setEnabled(false);
+                        const auto odDisabledImg = renderAtScale(*overdriveTog, 1.0f);
+                        overdriveTog->setEnabled(true);
+                        expect(imageDiffRms(odOnImg, odDisabledImg) > 0.02,
+                               "036 OVERDRIVE Disabled vs Enabled visuals must differ clearly");
+
+                        const auto monoOnImg = renderAtScale(*monoTog, 1.0f);
+                        monoBtn.setToggleState(false, juce::sendNotificationSync);
+                        expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "monoLock1300"), 0.0f, 1e-4f);
+                        const auto monoOffImg = renderAtScale(*monoTog, 1.0f);
+                        expect(imageDiffRms(monoOnImg, monoOffImg) > 0.025,
+                               "1300 MONO LOCK ON vs OFF visuals must differ clearly");
+                        monoBtn.setToggleState(true, juce::sendNotificationSync);
+                        expectWithinAbsoluteError(getParamPlainValue(proc.apvts, "monoLock1300"), 1.0f, 1e-4f);
+
+                        // Color channel verification: Red LED aura/ring on 036 OVERDRIVE ON vs Cyan LED aura/ring on 1300 MONO LOCK ON
+                        const auto odLedBox   = overdriveTog->getLedBounds().toNearestInt();
+                        const auto monoLedBox = monoTog->getLedBounds().toNearestInt();
+                        double odRedSum = 0.0, odBlueSum = 0.0;
+                        for (int y = odLedBox.getY(); y < odLedBox.getBottom(); ++y)
+                        {
+                            for (int x = odLedBox.getX(); x < odLedBox.getRight(); ++x)
+                            {
+                                const auto px = odOnImg.getPixelAt(x, y);
+                                odRedSum += px.getRed();
+                                odBlueSum += px.getBlue();
+                            }
+                        }
+                        double monoRedSum = 0.0, monoBlueSum = 0.0;
+                        for (int y = monoLedBox.getY(); y < monoLedBox.getBottom(); ++y)
+                        {
+                            for (int x = monoLedBox.getX(); x < monoLedBox.getRight(); ++x)
+                            {
+                                const auto px = monoOnImg.getPixelAt(x, y);
+                                monoRedSum += px.getRed();
+                                monoBlueSum += px.getBlue();
+                            }
+                        }
+                        expect(odRedSum > odBlueSum * 1.4,
+                               "036 OVERDRIVE LED area must emphasize crimson red palette");
+                        expect(monoBlueSum > monoRedSum * 1.4,
+                               "1300 MONO LOCK LED area must emphasize cyan palette");
+
+                        // 4. Factory presets update secondary DSP controls properly
+                        const auto& presets = AllyPresets::getFactoryPresets();
+                        for (size_t i = 0; i < presets.size(); ++i)
+                        {
+                            AllyPresets::applyPreset(proc.apvts, static_cast<int>(i));
+                            expectEquals(combo.getSelectedId(), presets[i].stadsdeelIndex + 1);
+                            expectEquals(odBtn.getToggleState() ? 1 : 0, presets[i].overdrive036 ? 1 : 0);
+                            expectEquals(monoBtn.getToggleState() ? 1 : 0, presets[i].monoLock1300 ? 1 : 0);
+                            expectWithinAbsoluteError(static_cast<float>(releaseKnob->getSlider().getValue()),
+                                                      presets[i].releaseMs, 1.01f);
+                        }
+
+                        // 5. Responsive layout & no-overlap/no-clipping across 680x500, 780x580, 1200x850
+                        const juce::Point<int> sizes[] = { { 680, 500 }, { 780, 580 }, { 1200, 850 } };
+                        for (const auto& sz : sizes)
+                        {
+                            editor->setSize(sz.x, sz.y);
+
+                            expect(primaryPanel->getBottom() <= secondaryPanel->getY(),
+                                   "SecondaryDspPanel must sit cleanly below PrimaryKnobsPanel");
+
+                            const auto chassis = secondaryPanel->getChassisBounds();
+                            expect(!chassis.isEmpty(), "Secondary chassis bounds must be non-empty");
+                            expect(secondaryPanel->getLocalBounds().toFloat().contains(chassis),
+                                   "Secondary chassis must remain inside SecondaryDspPanel");
+
+                            const juce::Component* ordered[5] = {
+                                stadsdeelCtrl, attackKnob, releaseKnob, overdriveTog, monoTog
+                            };
+                            for (int c = 0; c < 5; ++c)
+                            {
+                                expect(chassis.contains(ordered[c]->getBounds().toFloat()),
+                                       "Secondary control must fit inside chamfered secondary chassis");
+                                if (c > 0)
+                                    expect(ordered[c - 1]->getRight() <= ordered[c]->getX(),
+                                           "Secondary controls must sit in left-to-right order without overlap");
+                            }
+
+                            expect(stadsdeelCtrl->getLocalBounds().toFloat().contains(stadsdeelCtrl->getIconBounds()),
+                                   "Stadsdeel icon must not clip");
+                            expect(stadsdeelCtrl->getLocalBounds().toFloat().contains(stadsdeelCtrl->getLabelBounds()),
+                                   "Stadsdeel label must not clip");
+                            expect(stadsdeelCtrl->getLocalBounds().contains(stadsdeelCtrl->getComboBounds()),
+                                   "Stadsdeel ComboBox must not clip");
+
+                            for (const auto* mini : { attackKnob, releaseKnob })
+                            {
+                                const auto ml = mini->getLocalBounds().toFloat();
+                                expect(ml.contains(mini->getTitleBounds()), "Mini title must not clip");
+                                expect(ml.contains(mini->getDialBounds()), "Mini dial must not clip");
+                                expect(ml.contains(mini->getReadoutBounds()), "Mini readout must not clip");
+                            }
+                        }
+
+                        editor->setSize(780, 580);
+                        // 6. HiDPI render validation on SecondaryDspPanel
+                        const float scales[] = { 1.0f, 1.25f, 1.5f, 2.0f };
+                        for (const float scale : scales)
+                        {
+                            const auto scaled = renderAtScale(*secondaryPanel, scale);
+                            expect(scaled.isValid() && scaled.getWidth() > 0 && scaled.getHeight() > 0,
+                                   "HiDPI SecondaryDspPanel render must succeed");
+                            const auto emptyCheck = juce::Image(juce::Image::ARGB, scaled.getWidth(), scaled.getHeight(), true);
+                            expect(imageDiffRms(scaled, emptyCheck) > 0.02,
+                                   "HiDPI SecondaryDspPanel render must draw non-empty content");
+                        }
                     }
                 }
             }

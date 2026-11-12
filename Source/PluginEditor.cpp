@@ -16,39 +16,9 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
     primaryKnobsPanel = std::make_unique<AllyGUI::PrimaryKnobsPanel>(audioProcessor.apvts);
     addAndMakeVisible(*primaryKnobsPanel);
 
-    // 3. The 2 Compact Knobs (Attack & Release) placed outside the main big row
-    knobAttack = std::make_unique<AllyGUI::HeavyKnob>(
-        "ATTACK", "attack", audioProcessor.apvts, "ms", false, true);
-    addAndMakeVisible(*knobAttack);
-
-    knobRelease = std::make_unique<AllyGUI::HeavyKnob>(
-        "RELEASE", "release", audioProcessor.apvts, "ms", false, true);
-    addAndMakeVisible(*knobRelease);
-
-    // 4. Stadsdeel Mode Selector
-    stadsdeelLabel.setText("STADSDEEL DSP", juce::dontSendNotification);
-    stadsdeelLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 10.5f, juce::Font::bold));
-    stadsdeelLabel.setColour(juce::Label::textColourId, AllyGUI::BrutalistLookAndFeel::industrialText);
-    stadsdeelLabel.setJustificationType(juce::Justification::centred);
-    addAndMakeVisible(stadsdeelLabel);
-
-    stadsdeelBox.addItem("Haven (1350) - Tape/Tube", 1);
-    stadsdeelBox.addItem("Centrum (1315) - Hard Clip", 2);
-    stadsdeelBox.addItem("Poort (1363) - Clean Exciter", 3);
-    stadsdeelBox.addItem("Buiten (1330) - Foldback", 4);
-    addAndMakeVisible(stadsdeelBox);
-
-    stadsdeelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.apvts, "stadsdeel", stadsdeelBox);
-
-    // 5. Two Master Switches
-    toggleOverdrive036 = std::make_unique<AllyGUI::BrutalistToggle>(
-        "036 OVERDRIVE", "overdrive036", audioProcessor.apvts, true);
-    addAndMakeVisible(*toggleOverdrive036);
-
-    toggleMonoLock1300 = std::make_unique<AllyGUI::BrutalistToggle>(
-        "1300 MONO LOCK", "monoLock1300", audioProcessor.apvts, false);
-    addAndMakeVisible(*toggleMonoLock1300);
+    // 3. Shared Engineered Depth Secondary DSP Panel (STADSDEEL DSP, ATTACK/RELEASE Mini Rings, 036 OVERDRIVE, 1300 MONO LOCK)
+    secondaryDspPanel = std::make_unique<AllyGUI::SecondaryDspPanel>(audioProcessor.apvts);
+    addAndMakeVisible(*secondaryDspPanel);
 
     // 6. Preset Bar
     setupPresets();
@@ -384,35 +354,10 @@ void AllyBassAudioProcessorEditor::resized()
     // Controls Section
     auto controlsArea = area.reduced(14, 4);
 
-    // 1. Bottom Sub-Row for:
-    // [ STADSDEEL SELECTOR ] [ ATTACK (mini) ] [ RELEASE (mini) ] [ 036 OVERDRIVE ] [ 1300 MONO LOCK ]
-    auto bottomRow = controlsArea.removeFromBottom(56);
-
-    int stadsdeelWidth = 190;
-    int miniKnobWidth = 58;
-    int switchWidth = 145;
-    int gap = 10;
-
-    int totalBottomWidth = stadsdeelWidth + gap + (miniKnobWidth * 2 + 4) + gap + (switchWidth * 2 + gap);
-    int startX = controlsArea.getX() + (controlsArea.getWidth() - totalBottomWidth) / 2;
-
-    // Stadsdeel
-    stadsdeelLabel.setBounds(startX, bottomRow.getY() + 2, stadsdeelWidth, 14);
-    stadsdeelBox.setBounds(startX, bottomRow.getY() + 18, stadsdeelWidth, 28);
-    startX += stadsdeelWidth + gap;
-
-    // Small Attack & Release Knobs
-    knobAttack->setBounds(startX, bottomRow.getY(), miniKnobWidth, bottomRow.getHeight());
-    startX += miniKnobWidth + 4;
-
-    knobRelease->setBounds(startX, bottomRow.getY(), miniKnobWidth, bottomRow.getHeight());
-    startX += miniKnobWidth + gap;
-
-    // Master Switches
-    toggleOverdrive036->setBounds(startX, bottomRow.getY() + 18, switchWidth, 28);
-    startX += switchWidth + gap;
-
-    toggleMonoLock1300->setBounds(startX, bottomRow.getY() + 18, switchWidth, 28);
+    // 1. Secondary DSP Console Bar (Stadsdeel DSP | Attack & Release Mini Rings | 036 Overdrive | 1300 Mono Lock)
+    const int secondaryH = juce::jlimit(62, 82, juce::roundToInt(static_cast<float>(controlsArea.getHeight()) * 0.23f));
+    auto secondaryArea = controlsArea.removeFromBottom(secondaryH);
+    secondaryDspPanel->setBounds(secondaryArea.reduced(0, 1));
 
     // 2. Top Main Knobs Row: Engineered Depth chamfered chassis with 5 uniform Depth Rings
     primaryKnobsPanel->setBounds(controlsArea.reduced(0, 2));
