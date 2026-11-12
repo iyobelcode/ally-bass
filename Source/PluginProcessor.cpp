@@ -50,10 +50,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout AllyBassAudioProcessor::crea
         0.15f,
         juce::AudioParameterFloatAttributes().withLabel("Drive")));
 
-    // 4. WEERWATER GLIDE (Portamento Time)
+    // 4. WATERWIJK GLIDE (Portamento Time)
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{"weerwaterGlide", 1},
-        "WEERWATER GLIDE",
+        juce::ParameterID{"waterwijkGlide", 1},
+        "WATERWIJK GLIDE",
         juce::NormalisableRange<float>(0.0f, 500.0f, 0.5f, 0.45f),
         40.0f,
         juce::AudioParameterFloatAttributes().withLabel("ms")));
@@ -136,7 +136,7 @@ void AllyBassAudioProcessor::changeProgramName(int, const juce::String&) {}
 
 void AllyBassAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    weerwaterGlide.prepare(sampleRate);
+    waterwijkGlide.prepare(sampleRate);
     napSubOsc.prepare(sampleRate);
     polderTransient.prepare(sampleRate);
     stadsdeelSaturation.prepare(sampleRate);
@@ -158,7 +158,7 @@ void AllyBassAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
 
 void AllyBassAudioProcessor::releaseResources()
 {
-    weerwaterGlide.reset();
+    waterwijkGlide.reset();
     napSubOsc.reset();
     polderTransient.reset();
     stadsdeelSaturation.reset();
@@ -199,9 +199,9 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
     juce::ignoreUnused(punchAmount);
     if (message.isNoteOn())
     {
-        float glideMs = apvts.getRawParameterValue("weerwaterGlide")->load();
+        float glideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
         float vel = message.getFloatVelocity();
-        weerwaterGlide.noteOn(message.getNoteNumber(), vel, glideMs);
+        waterwijkGlide.noteOn(message.getNoteNumber(), vel, glideMs);
 
         targetVelocity = vel;
 
@@ -217,16 +217,16 @@ void AllyBassAudioProcessor::handleMidiEvent(const juce::MidiMessage& message, f
     }
     else if (message.isNoteOff())
     {
-        float glideMs = apvts.getRawParameterValue("weerwaterGlide")->load();
-        weerwaterGlide.noteOff(message.getNoteNumber(), glideMs);
-        if (!weerwaterGlide.getIsNoteActive())
+        float glideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
+        waterwijkGlide.noteOff(message.getNoteNumber(), glideMs);
+        if (!waterwijkGlide.getIsNoteActive())
         {
             envState = EnvelopeState::Release;
         }
     }
     else if (message.isAllNotesOff() || message.isAllSoundOff())
     {
-        weerwaterGlide.reset();
+        waterwijkGlide.reset();
         envState = EnvelopeState::Idle;
         envLevel = 0.0f;
     }
@@ -251,7 +251,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     const float diepte = apvts.getRawParameterValue("diepte")->load();
     const float polderPunch = apvts.getRawParameterValue("polderPunch")->load();
     const float havenDirt = apvts.getRawParameterValue("havenDirt")->load();
-    const float weerwaterGlideMs = apvts.getRawParameterValue("weerwaterGlide")->load();
+    const float waterwijkGlideMs = apvts.getRawParameterValue("waterwijkGlide")->load();
     const float masterVolDb = apvts.getRawParameterValue("masterVolume")->load();
     const float masterGain = juce::Decibels::decibelsToGain(masterVolDb);
 
@@ -262,7 +262,7 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     const bool isMonoLock = apvts.getRawParameterValue("monoLock1300")->load() > 0.5f;
 
     updateEnvelopeRates(attackMs, releaseMs);
-    weerwaterGlide.updateGlideCoeff(weerwaterGlideMs, weerwaterGlide.getCurrentVelocity());
+    waterwijkGlide.updateGlideCoeff(waterwijkGlideMs, waterwijkGlide.getCurrentVelocity());
 
     auto* leftOut = buffer.getWritePointer(0);
     auto* rightOut = totalNumOutputChannels > 1 ? buffer.getWritePointer(1) : nullptr;
@@ -281,9 +281,9 @@ void AllyBassAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         }
 
         // Advance synth voice
-        float instantFreq = weerwaterGlide.processNextFrequency();
+        float instantFreq = waterwijkGlide.processNextFrequency();
 
-        if (weerwaterGlide.popPhaseReset())
+        if (waterwijkGlide.popPhaseReset())
             napSubOsc.resetNapLock();
 
         // Advance Envelope State Machine (Attack -> Sustain -> Release)

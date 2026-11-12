@@ -25,9 +25,9 @@ AllyBassAudioProcessorEditor::AllyBassAudioProcessorEditor(AllyBassAudioProcesso
         "HAVEN DIRT", "havenDirt", audioProcessor.apvts, "DIRT", true, false);
     addAndMakeVisible(*knobHavenDirt);
 
-    knobWeerwaterGlide = std::make_unique<AllyGUI::HeavyKnob>(
-        "WEERWATER GLIDE", "weerwaterGlide", audioProcessor.apvts, "ms", false, false);
-    addAndMakeVisible(*knobWeerwaterGlide);
+    knobWaterwijkGlide = std::make_unique<AllyGUI::HeavyKnob>(
+        "WATERWIJK GLIDE", "waterwijkGlide", audioProcessor.apvts, "ms", false, false);
+    addAndMakeVisible(*knobWaterwijkGlide);
 
     knobMasterVol = std::make_unique<AllyGUI::HeavyKnob>(
         "OUTPUT", "masterVolume", audioProcessor.apvts, "dB", false, false);
@@ -432,13 +432,13 @@ void AllyBassAudioProcessorEditor::resized()
     toggleMonoLock1300->setBounds(startX, bottomRow.getY() + 18, switchWidth, 28);
 
     // 2. Top Main Knobs Row: Exactly 5 BIG, HEAVY KNOBS
-    // [ DIEPTE ] [ POLDER PUNCH ] [ HAVEN DIRT ] [ WEERWATER GLIDE ] [ OUTPUT ]
+    // [ DIEPTE ] [ POLDER PUNCH ] [ HAVEN DIRT ] [ WATERWIJK GLIDE ] [ OUTPUT ]
     int numBigKnobs = 5;
     float bigKnobWidth = static_cast<float>(controlsArea.getWidth()) / static_cast<float>(numBigKnobs);
 
     knobDiepte->setBounds(static_cast<int>(controlsArea.getX() + 0 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
     knobPolderPunch->setBounds(static_cast<int>(controlsArea.getX() + 1 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
     knobHavenDirt->setBounds(static_cast<int>(controlsArea.getX() + 2 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
-    knobWeerwaterGlide->setBounds(static_cast<int>(controlsArea.getX() + 3 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
+    knobWaterwijkGlide->setBounds(static_cast<int>(controlsArea.getX() + 3 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
     knobMasterVol->setBounds(static_cast<int>(controlsArea.getX() + 4 * bigKnobWidth), controlsArea.getY(), static_cast<int>(bigKnobWidth), controlsArea.getHeight());
 }

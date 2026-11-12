@@ -54,7 +54,7 @@ $$y = x \cdot (1.0 + 0.4 \cdot \text{drive}) + 0.15 \cdot \text{drive} \cdot (2 
 Resonant piekfilter op 550 Hz ($Q=2.0$) gevolgd door een wavefolder:
 $$y = \sin\left(x_{\text{boosted}} \cdot (1.0 + 4.5 \cdot \text{drive}) \cdot \frac{\pi}{2}\right)$$
 
-### 4. Weerwater Dynamic Portamento / Glide Engine
+### 4. Waterwijk Dynamic Portamento / Glide Engine
 - Monofone Last-Note Priority legato engine.
 - **Velocity-gevoelige slide**: Hoe harder de noot wordt aangeslagen, hoe sneller de glidecurve:
   $$t_{\text{eff}} = t_{\text{glide}} \cdot (1.3 - 0.7 \cdot \text{velocity})$$
@@ -72,7 +72,8 @@ $$y = \sin\left(x_{\text{boosted}} \cdot (1.0 + 4.5 \cdot \text{drive}) \cdot \f
 2. **POLDER PUNCH** (`polderPunch`): Bepaalt de transient knock en snap in de mix.
 3. **VERVAL** (`verval`): Vormt de staart van de 808 (van 0.05s boombap punch tot 5.0s doordreunende drill sustain).
 4. **HAVEN DIRT** (`havenDirt`): Stuurt de geselecteerde stadsdeel-saturatie aan.
-5. **WEERWATER GLIDE** (`weerwaterGlide`): Bepaalt de glijtijd en legato slide respons (0 tot 500 ms).
+5. **WATERWIJK GLIDE** (`waterwijkGlide`): Bepaalt de glijtijd en legato slide respons (0 tot 500 ms).
+   *(Testfase-notitie: directe hernoeming vanaf oude ID `weerwaterGlide` zonder legacy-migratie; oude test-DAW-projecten/automations met `weerwaterGlide` verliezen de oude glide-binding en vallen terug op 40.0 ms.)*
 6. **STADSDEEL SELECTOR**: 4-standen selector (*Haven 1350*, *Centrum 1315*, *Poort 1363*, *Buiten 1330*).
 * **036 OVERDRIVE**: Parallel NYC compression + 6dB saturation boost (Toggle).
 * **1300 MONO LOCK**: Sub < 90Hz hard mono crossover (Toggle).
@@ -88,7 +89,7 @@ $$y = \sin\left(x_{\text{boosted}} \cdot (1.0 + 4.5 \cdot \text{drive}) \cdot \f
 ---
 
 ## 💾 Almere Factory Presets
-1. `01_Kasteel_Drill_Slide`: Lange decay (2.5s), Centrum clipping, snelle Weerwater glide (85ms), 036 Overdrive & Mono Lock actief.
+1. `01_Kasteel_Drill_Slide`: Lange decay (2.5s), Centrum clipping, snelle Waterwijk glide (85ms), 036 Overdrive & Mono Lock actief.
 2. `02_Stedenwijk_Boom`: Korte decay (0.45s), Haven dirt, zware Polder Punch (90%), instant boombap thump.
 3. `03_Pampus_Deep_Sub`: Zachte punch, Poort exciter, diepe -4.5m NAP focus (90%), pure en diepe sub-druk.
 

@@ -6,7 +6,7 @@
 #include "DSP/NapSubOscillator.h"
 #include "DSP/PolderTransient.h"
 #include "DSP/StadsdeelSaturation.h"
-#include "DSP/WeerwaterGlide.h"
+#include "DSP/WaterwijkGlide.h"
 #include "DSP/MonoLockFilter.h"
 #include "DSP/Overdrive036.h"
 
@@ -59,7 +59,7 @@ private:
     juce::MidiKeyboardState keyboardState;
 
     // DSP Modules
-    AllyDSP::WeerwaterGlide weerwaterGlide;
+    AllyDSP::WaterwijkGlide waterwijkGlide;
     AllyDSP::NapSubOscillator napSubOsc;
     AllyDSP::PolderTransient polderTransient;
     AllyDSP::StadsdeelSaturation stadsdeelSaturation;

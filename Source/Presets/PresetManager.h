@@ -13,7 +13,7 @@ struct Preset
     float attackMs;
     float releaseMs;
     float havenDirt;
-    float weerwaterGlide;
+    float waterwijkGlide;
     int stadsdeelIndex;
     bool overdrive036;
     bool monoLock1300;
@@ -30,7 +30,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             3.5f,    // Attack: 3.5 ms
             650.0f,  // Release: 650 ms
             0.45f,   // Haven Dirt (Centrum grit)
-            85.0f,   // Weerwater Glide (drill slides)
+            85.0f,   // Waterwijk Glide (drill slides)
             1,       // Centrum (1315)
             true,    // 036 Overdrive: ON
             true     // 1300 Mono Lock: ON
@@ -43,7 +43,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             1.5f,    // Attack: 1.5 ms
             160.0f,  // Release: 160 ms (tight)
             0.25f,   // Haven Dirt
-            0.0f,    // Weerwater Glide: 0
+            0.0f,    // Waterwijk Glide: 0
             0,       // Haven (1350)
             false,   // 036 Overdrive: OFF
             true     // 1300 Mono Lock: ON
@@ -56,7 +56,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             18.0f,   // Attack: 18 ms velvety swell
             1200.0f, // Release: 1200 ms extended tail
             0.05f,   // Haven Dirt
-            40.0f,   // Weerwater Glide
+            40.0f,   // Waterwijk Glide
             2,       // Poort (1363)
             false,   // 036 Overdrive: OFF
             true     // 1300 Mono Lock: ON
@@ -69,7 +69,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             1.2f,    // Attack: 1.2 ms ultra-fast punch
             380.0f,  // Release: 380 ms bouncy trap tail
             0.55f,   // Haven Dirt: aggressive crunch
-            15.0f,   // Weerwater Glide: quick 15ms bounce
+            15.0f,   // Waterwijk Glide: quick 15ms bounce
             1,       // Centrum (1315 hard clip)
             true,    // 036 Overdrive: ON (+6dB parallel push)
             true     // 1300 Mono Lock: ON
@@ -82,7 +82,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             0.8f,    // Attack: 0.8 ms
             180.0f,  // Release: 180 ms short pluck
             0.20f,   // Haven Dirt
-            0.0f,    // Weerwater Glide: 0
+            0.0f,    // Waterwijk Glide: 0
             0,       // Haven (1350)
             false,   // 036 Overdrive: OFF
             true     // 1300 Mono Lock: ON
@@ -95,7 +95,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             2.0f,    // Attack: 2.0 ms
             500.0f,  // Release: 500 ms
             0.80f,   // Haven Dirt: extreme foldback
-            35.0f,   // Weerwater Glide
+            35.0f,   // Waterwijk Glide
             3,       // Buiten (1330 foldback)
             true,    // 036 Overdrive: ON
             true     // 1300 Mono Lock: ON
@@ -108,7 +108,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             12.0f,   // Attack: 12 ms smooth
             850.0f,  // Release: 850 ms
             0.00f,   // Haven Dirt: 0% completely pure
-            50.0f,   // Weerwater Glide
+            50.0f,   // Waterwijk Glide
             2,       // Poort (1363)
             false,   // 036 Overdrive: OFF
             true     // 1300 Mono Lock: ON
@@ -121,7 +121,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             1.0f,    // Attack: 1.0 ms
             280.0f,  // Release: 280 ms tight Detroit decay
             0.40f,   // Haven Dirt
-            10.0f,   // Weerwater Glide: 10 ms
+            10.0f,   // Waterwijk Glide: 10 ms
             1,       // Centrum (1315)
             true,    // 036 Overdrive: ON
             true     // 1300 Mono Lock: ON
@@ -134,7 +134,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             8.0f,    // Attack: 8 ms
             900.0f,  // Release: 900 ms long slide
             0.30f,   // Haven Dirt
-            120.0f,  // Weerwater Glide: 120 ms long glide
+            120.0f,  // Waterwijk Glide: 120 ms long glide
             0,       // Haven (1350)
             false,   // 036 Overdrive: OFF
             true     // 1300 Mono Lock: ON
@@ -147,7 +147,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             4.0f,    // Attack: 4 ms
             450.0f,  // Release: 450 ms
             0.60f,   // Haven Dirt: warm tape saturation
-            25.0f,   // Weerwater Glide
+            25.0f,   // Waterwijk Glide
             0,       // Haven (1350)
             false,   // 036 Overdrive: OFF
             true     // 1300 Mono Lock: ON
@@ -160,7 +160,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             85.0f,   // Attack: 85 ms slow swell
             1800.0f, // Release: 1.8s long cinematic tail
             0.10f,   // Haven Dirt
-            60.0f,   // Weerwater Glide
+            60.0f,   // Waterwijk Glide
             2,       // Poort (1363)
             false,   // 036 Overdrive: OFF
             true     // 1300 Mono Lock: ON
@@ -173,7 +173,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             2.5f,    // Attack: 2.5 ms
             550.0f,  // Release: 550 ms
             0.70f,   // Haven Dirt: hard clipped
-            65.0f,   // Weerwater Glide: drill slides
+            65.0f,   // Waterwijk Glide: drill slides
             1,       // Centrum (1315)
             true,    // 036 Overdrive: ON
             true     // 1300 Mono Lock: ON
@@ -186,7 +186,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             15.0f,   // Attack: 15 ms
             1500.0f, // Release: 1.5s
             0.02f,   // Haven Dirt: pure sub
-            30.0f,   // Weerwater Glide
+            30.0f,   // Waterwijk Glide
             2,       // Poort (1363)
             true,    // 036 Overdrive: ON (sub boost)
             true     // 1300 Mono Lock: ON
@@ -199,7 +199,7 @@ inline const std::vector<Preset>& getFactoryPresets()
             1.8f,    // Attack: 1.8 ms
             420.0f,  // Release: 420 ms
             0.50f,   // Haven Dirt
-            20.0f,   // Weerwater Glide
+            20.0f,   // Waterwijk Glide
             1,       // Centrum (1315)
             true,    // 036 Overdrive: ON
             true     // 1300 Mono Lock: ON
@@ -226,8 +226,8 @@ inline void applyPreset(juce::AudioProcessorValueTreeState& apvts, int presetInd
         param->setValueNotifyingHost(param->convertTo0to1(p.releaseMs));
     if (auto* param = apvts.getParameter("havenDirt"))
         param->setValueNotifyingHost(param->convertTo0to1(p.havenDirt));
-    if (auto* param = apvts.getParameter("weerwaterGlide"))
-        param->setValueNotifyingHost(param->convertTo0to1(p.weerwaterGlide));
+    if (auto* param = apvts.getParameter("waterwijkGlide"))
+        param->setValueNotifyingHost(param->convertTo0to1(p.waterwijkGlide));
     if (auto* param = apvts.getParameter("stadsdeel"))
         param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(p.stadsdeelIndex)));
     if (auto* param = apvts.getParameter("overdrive036"))

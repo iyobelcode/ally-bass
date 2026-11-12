@@ -47,7 +47,7 @@ private:
     std::unique_ptr<AllyGUI::HeavyKnob> knobDiepte;
     std::unique_ptr<AllyGUI::HeavyKnob> knobPolderPunch;
     std::unique_ptr<AllyGUI::HeavyKnob> knobHavenDirt;
-    std::unique_ptr<AllyGUI::HeavyKnob> knobWeerwaterGlide;
+    std::unique_ptr<AllyGUI::HeavyKnob> knobWaterwijkGlide;
     std::unique_ptr<AllyGUI::HeavyKnob> knobMasterVol;
 
     // The 2 Compact Knobs (Attack & Release)

@@ -5,10 +5,10 @@
 namespace AllyDSP
 {
 
-class WeerwaterGlide
+class WaterwijkGlide
 {
 public:
-    WeerwaterGlide() = default;
+    WaterwijkGlide() = default;
 
     void prepare(double sampleRate)
     {
@@ -95,7 +95,7 @@ public:
             return;
         }
 
-        // Weerwater Dynamic Glide: Higher velocity = faster slide curve
+        // Waterwijk Dynamic Glide: Higher velocity = faster slide curve
         // Velocity scales glide time from 0.6x (velocity 1.0) up to 1.3x (velocity 0.0)
         float dynamicScale = juce::jlimit(0.5f, 1.4f, 1.3f - 0.7f * velocity);
         float effectiveGlideTimeMs = glideTimeMs * dynamicScale;

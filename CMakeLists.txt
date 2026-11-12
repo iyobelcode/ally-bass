@@ -39,7 +39,7 @@ juce_add_plugin(AllyBass
     BUNDLE_ID "com.juicedunicorn.allybass"
 )
 
-target_sources(AllyBass PRIVATE
+set(ALLY_SHARED_SOURCES
     Source/PluginProcessor.h
     Source/PluginProcessor.cpp
     Source/PluginEditor.h
@@ -47,7 +47,7 @@ target_sources(AllyBass PRIVATE
     Source/DSP/NapSubOscillator.h
     Source/DSP/PolderTransient.h
     Source/DSP/StadsdeelSaturation.h
-    Source/DSP/WeerwaterGlide.h
+    Source/DSP/WaterwijkGlide.h
     Source/DSP/MonoLockFilter.h
     Source/DSP/Overdrive036.h
     Source/GUI/BrutalistLookAndFeel.h
@@ -58,6 +58,8 @@ target_sources(AllyBass PRIVATE
     Source/GUI/BrutalistToggle.h
     Source/Presets/PresetManager.h
 )
+
+target_sources(AllyBass PRIVATE ${ALLY_SHARED_SOURCES})
 
 target_compile_definitions(AllyBass PRIVATE
     JUCE_WEB_BROWSER=0
@@ -74,3 +76,36 @@ target_link_libraries(AllyBass PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags
 )
+
+option(ALLY_BUILD_TESTS "Build automated regression tests" ON)
+if(ALLY_BUILD_TESTS)
+    enable_testing()
+    juce_add_console_app(AllyBassTests
+        PRODUCT_NAME "AllyBassTests"
+    )
+    target_sources(AllyBassTests PRIVATE
+        Tests/AllyBassTests.cpp
+        ${ALLY_SHARED_SOURCES}
+    )
+    target_include_directories(AllyBassTests PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Source"
+    )
+    target_compile_definitions(AllyBassTests PRIVATE
+        JucePlugin_Name="ALLY - 1300 SUB SYNTH"
+        JucePlugin_IsSynth=1
+        JucePlugin_IsMidiEffect=0
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0
+    )
+    target_link_libraries(AllyBassTests PRIVATE
+        juce::juce_audio_utils
+        juce::juce_audio_processors
+        juce::juce_dsp
+        juce::juce_gui_basics
+        juce::juce_gui_extra
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+    )
+    add_test(NAME AllyBassRegressionTests COMMAND AllyBassTests)
+endif()
