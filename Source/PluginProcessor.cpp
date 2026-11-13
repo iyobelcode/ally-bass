@@ -151,7 +151,16 @@ const juce::String AllyBassAudioProcessor::getName() const
 bool AllyBassAudioProcessor::acceptsMidi() const { return true; }
 bool AllyBassAudioProcessor::producesMidi() const { return false; }
 bool AllyBassAudioProcessor::isMidiEffect() const { return false; }
-double AllyBassAudioProcessor::getTailLengthSeconds() const { return 0.0; }
+double AllyBassAudioProcessor::getTailLengthSeconds() const
+{
+    // The monophonic bass engine features a configurable RELEASE envelope up to 3000 ms.
+    // The exponential release curve drops at -40 dB per releaseMs; reaching the -80 dB
+    // digital silence cutoff threshold (0.0001f) requires exactly 2.0x releaseMs (6.00 seconds).
+    // Returning a static, conservative 6.0 seconds guarantees DAWs (VST3/AUv2) never
+    // truncate offline bounces, region exports, or track freezes across any preset,
+    // avoiding host-dependent dynamic tail caching bugs or playback dropouts.
+    return 6.0;
+}
 
 int AllyBassAudioProcessor::getNumPrograms()
 {

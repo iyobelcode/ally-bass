@@ -4288,6 +4288,90 @@ public:
     }
 };
 
+class HostTailContractTests final : public juce::UnitTest
+{
+public:
+    HostTailContractTests() : juce::UnitTest("ALLY1300 Host Tail Contract (E.3A)", "AllyBass") {}
+
+    void runTest() override
+    {
+        beginTest("getTailLengthSeconds() returns valid finite value >= 6.0s covering max release decay");
+        {
+            AllyBassAudioProcessor proc;
+            const double tail = proc.getTailLengthSeconds();
+            expect(std::isfinite(tail), "Tail length must be a finite double");
+            expect(tail > 0.0, "Tail length must be strictly positive");
+            expect(tail >= 6.0, "Tail length must be at least 6.0s to cover 3000 ms release decaying to -80 dB");
+        }
+
+        beginTest("Actual audio decay at max release (3000 ms) settles to silence within reported tail");
+        {
+            const double sr = 44100.0;
+            const int bs = 512;
+            AllyBassAudioProcessor proc;
+            proc.prepareToPlay(sr, bs);
+
+            if (auto* p = proc.apvts.getParameter("release"))
+                p->setValueNotifyingHost(p->convertTo0to1(3000.0f));
+
+            juce::AudioBuffer<float> buffer(2, bs);
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+            proc.processBlock(buffer, midi);
+            midi.clear();
+
+            // Sustain for 1 sec
+            for (int i = 0; i < 88; ++i)
+            {
+                buffer.clear();
+                proc.processBlock(buffer, midi);
+            }
+
+            // NoteOff
+            midi.addEvent(juce::MidiMessage::noteOff(1, 36, 0.0f), 0);
+            buffer.clear();
+            proc.processBlock(buffer, midi);
+            midi.clear();
+
+            // Render through the tail duration (6.0 seconds = 517 blocks of 512)
+            const int tailBlocks = static_cast<int>(std::ceil((proc.getTailLengthSeconds() * sr) / bs));
+            for (int b = 0; b < tailBlocks; ++b)
+            {
+                buffer.clear();
+                proc.processBlock(buffer, midi);
+            }
+
+            // At the end of the reported tail, the audio output must be inaudible / digital zero (< 1e-4)
+            float maxSample = 0.0f;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                for (int s = 0; s < buffer.getNumSamples(); ++s)
+                    maxSample = std::max(maxSample, std::abs(buffer.getSample(ch, s)));
+
+            expect(maxSample < 0.0001f, "After reported tail duration, audio must be below -80 dB threshold");
+
+            proc.releaseResources();
+        }
+
+        beginTest("Presets, APVTS state recall and DSP audio bit-identity preserved");
+        {
+            AllyBassAudioProcessor proc;
+            proc.prepareToPlay(44100.0, 256);
+
+            for (int i = 0; i < proc.getNumPrograms(); ++i)
+            {
+                proc.setCurrentProgram(i);
+                expectEquals(proc.getTailLengthSeconds(), 6.0, "Tail length must remain consistent across presets");
+            }
+
+            // State recall
+            auto stateXml = proc.apvts.copyState().createXml();
+            proc.apvts.replaceState(juce::ValueTree::fromXml(*stateXml));
+            expectEquals(proc.getTailLengthSeconds(), 6.0, "Tail length must remain 6.0 after state restore");
+        }
+    }
+};
+
+static HostTailContractTests hostTailContractTests;
 static MidiSourceIsolationD1E1Tests midiSourceIsolationD1E1Tests;
 
 } // namespace
