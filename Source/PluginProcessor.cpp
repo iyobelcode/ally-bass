@@ -154,12 +154,14 @@ bool AllyBassAudioProcessor::isMidiEffect() const { return false; }
 double AllyBassAudioProcessor::getTailLengthSeconds() const
 {
     // The monophonic bass engine features a configurable RELEASE envelope up to 3000 ms.
-    // The exponential release curve drops at -40 dB per releaseMs; reaching the -80 dB
-    // digital silence cutoff threshold (0.0001f) requires exactly 2.0x releaseMs (6.00 seconds).
-    // Returning a static, conservative 6.0 seconds guarantees DAWs (VST3/AUv2) never
+    // While the primary envelope reaches -80 dBFS at 6.00 seconds (2.0x releaseMs),
+    // post-processing IIR stages (specifically the 5 Hz DC-blocker in 036 Overdrive)
+    // require up to 8.46 seconds under worst-case excitation to settle completely to
+    // bit-identical IEEE 754 zero.
+    // Returning a static, conservative 9.0 seconds guarantees DAWs (VST3/AUv2) never
     // truncate offline bounces, region exports, or track freezes across any preset,
-    // avoiding host-dependent dynamic tail caching bugs or playback dropouts.
-    return 6.0;
+    // providing a 538 ms digital silence margin while eliminating host caching bugs.
+    return 9.0;
 }
 
 int AllyBassAudioProcessor::getNumPrograms()

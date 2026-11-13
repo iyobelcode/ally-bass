@@ -4291,20 +4291,75 @@ public:
 class HostTailContractTests final : public juce::UnitTest
 {
 public:
-    HostTailContractTests() : juce::UnitTest("ALLY1300 Host Tail Contract (E.3A)", "AllyBass") {}
+    HostTailContractTests() : juce::UnitTest("ALLY1300 Host Tail Contract (E.3A.1)", "AllyBass") {}
 
     void runTest() override
     {
-        beginTest("getTailLengthSeconds() returns valid finite value >= 6.0s covering max release decay");
+        beginTest("getTailLengthSeconds() returns static 9.0s covering worst-case Overdrive and filter tails");
         {
             AllyBassAudioProcessor proc;
             const double tail = proc.getTailLengthSeconds();
             expect(std::isfinite(tail), "Tail length must be a finite double");
             expect(tail > 0.0, "Tail length must be strictly positive");
-            expect(tail >= 6.0, "Tail length must be at least 6.0s to cover 3000 ms release decaying to -80 dB");
+            expectEquals(tail, 9.0, "Tail length must be exactly 9.0s to cover worst-case 8.46s decay to bit-zero");
         }
 
-        beginTest("Actual audio decay at max release (3000 ms) settles to silence within reported tail");
+        beginTest("Multi-SR and Multi-BS: Audio decay at max release (3000 ms) settles to bit-zero within reported tail");
+        {
+            for (double sr : { 44100.0, 48000.0, 96000.0 })
+            {
+                for (int bs : { 64, 512, 1024 })
+                {
+                    AllyBassAudioProcessor proc;
+                    proc.prepareToPlay(sr, bs);
+
+                    if (auto* p = proc.apvts.getParameter("release"))
+                        p->setValueNotifyingHost(p->convertTo0to1(3000.0f));
+
+                    juce::AudioBuffer<float> buffer(2, bs);
+                    juce::MidiBuffer midi;
+                    midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+                    proc.processBlock(buffer, midi);
+                    midi.clear();
+
+                    // Sustain for 1 sec
+                    const int sustainBlocks = static_cast<int>(std::ceil(sr / bs));
+                    for (int i = 0; i < sustainBlocks; ++i)
+                    {
+                        buffer.clear();
+                        proc.processBlock(buffer, midi);
+                    }
+
+                    // NoteOff
+                    midi.addEvent(juce::MidiMessage::noteOff(1, 36, 0.0f), 0);
+                    buffer.clear();
+                    proc.processBlock(buffer, midi);
+                    midi.clear();
+
+                    // Render through the full reported tail duration (9.0 seconds)
+                    const int tailBlocks = static_cast<int>(std::ceil((proc.getTailLengthSeconds() * sr) / bs));
+                    for (int b = 0; b < tailBlocks; ++b)
+                    {
+                        buffer.clear();
+                        proc.processBlock(buffer, midi);
+                    }
+
+                    // At reported tail completion, audio output must be bit-identical zero on all channels
+                    float maxSample = 0.0f;
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        for (int s = 0; s < buffer.getNumSamples(); ++s)
+                            maxSample = std::max(maxSample, std::abs(buffer.getSample(ch, s)));
+
+                    expectEquals(maxSample, 0.0f,
+                                 "After reported 9.0s tail, audio output must be bit-identical zero (SR="
+                                 + juce::String(static_cast<int>(sr)) + ", BS=" + juce::String(bs) + ")");
+
+                    proc.releaseResources();
+                }
+            }
+        }
+
+        beginTest("Overdrive ON worst-case tail: C1 sub-bass at max drive settles to bit-zero within 9.0s");
         {
             const double sr = 44100.0;
             const int bs = 512;
@@ -4313,10 +4368,16 @@ public:
 
             if (auto* p = proc.apvts.getParameter("release"))
                 p->setValueNotifyingHost(p->convertTo0to1(3000.0f));
+            if (auto* p = proc.apvts.getParameter("overdrive036"))
+                p->setValueNotifyingHost(1.0f); // Overdrive ON (triggers 5 Hz DC blocker)
+            if (auto* p = proc.apvts.getParameter("havenDirt"))
+                p->setValueNotifyingHost(1.0f); // Max dirt
+            if (auto* p = proc.apvts.getParameter("masterVolume"))
+                p->setValueNotifyingHost(1.0f); // Max volume (+6 dB)
 
             juce::AudioBuffer<float> buffer(2, bs);
             juce::MidiBuffer midi;
-            midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+            midi.addEvent(juce::MidiMessage::noteOn(1, 24, 1.0f), 0); // Note C1 (32.7 Hz) full velocity
             proc.processBlock(buffer, midi);
             midi.clear();
 
@@ -4328,12 +4389,12 @@ public:
             }
 
             // NoteOff
-            midi.addEvent(juce::MidiMessage::noteOff(1, 36, 0.0f), 0);
+            midi.addEvent(juce::MidiMessage::noteOff(1, 24, 0.0f), 0);
             buffer.clear();
             proc.processBlock(buffer, midi);
             midi.clear();
 
-            // Render through the tail duration (6.0 seconds = 517 blocks of 512)
+            // Render through the full reported tail duration (9.0 seconds = 776 blocks)
             const int tailBlocks = static_cast<int>(std::ceil((proc.getTailLengthSeconds() * sr) / bs));
             for (int b = 0; b < tailBlocks; ++b)
             {
@@ -4341,13 +4402,26 @@ public:
                 proc.processBlock(buffer, midi);
             }
 
-            // At the end of the reported tail, the audio output must be inaudible / digital zero (< 1e-4)
-            float maxSample = 0.0f;
+            float maxSampleAtTail = 0.0f;
             for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
                 for (int s = 0; s < buffer.getNumSamples(); ++s)
-                    maxSample = std::max(maxSample, std::abs(buffer.getSample(ch, s)));
+                    maxSampleAtTail = std::max(maxSampleAtTail, std::abs(buffer.getSample(ch, s)));
 
-            expect(maxSample < 0.0001f, "After reported tail duration, audio must be below -80 dB threshold");
+            expectEquals(maxSampleAtTail, 0.0f,
+                         "Overdrive ON audio output must be bit-identical zero at 9.0s (covering 8.46s DC-blocker decay)");
+
+            // Permanent silence check: render an additional 1.0s and verify it remains strictly 0.0f
+            bool permanentSilence = true;
+            for (int b = 0; b < 88; ++b)
+            {
+                buffer.clear();
+                proc.processBlock(buffer, midi);
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    for (int s = 0; s < buffer.getNumSamples(); ++s)
+                        if (buffer.getSample(ch, s) != 0.0f)
+                            permanentSilence = false;
+            }
+            expect(permanentSilence, "Output must remain permanently bit-identical zero after tail completion");
 
             proc.releaseResources();
         }
@@ -4360,13 +4434,13 @@ public:
             for (int i = 0; i < proc.getNumPrograms(); ++i)
             {
                 proc.setCurrentProgram(i);
-                expectEquals(proc.getTailLengthSeconds(), 6.0, "Tail length must remain consistent across presets");
+                expectEquals(proc.getTailLengthSeconds(), 9.0, "Tail length must remain consistent across presets");
             }
 
             // State recall
             auto stateXml = proc.apvts.copyState().createXml();
             proc.apvts.replaceState(juce::ValueTree::fromXml(*stateXml));
-            expectEquals(proc.getTailLengthSeconds(), 6.0, "Tail length must remain 6.0 after state restore");
+            expectEquals(proc.getTailLengthSeconds(), 9.0, "Tail length must remain 9.0 after state restore");
         }
     }
 };
