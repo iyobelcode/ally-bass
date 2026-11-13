@@ -4,6 +4,8 @@ on:
   push:
     branches: [ main ]
     tags:    [ 'v*' ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:          # manual trigger from GitHub UI
 
 jobs:
@@ -34,7 +36,12 @@ jobs:
         shell: cmd
         run: cmake --build build --config Release --parallel
 
-      # ── 5. Locate the built VST3 ──────────────────────────────────────────
+      # ── 5. Run automated regression tests (DSP, MIDI, APVTS, UI) ───────────
+      - name: Run automated regression tests
+        shell: cmd
+        run: ctest --test-dir build --output-on-failure -C Release
+
+      # ── 6. Locate the built VST3 ──────────────────────────────────────────
       - name: Find VST3 artefact
         shell: pwsh
         run: |
@@ -43,7 +50,15 @@ jobs:
           Write-Output "VST3_PATH=$($vst3.FullName)" | Out-File $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "Found: $($vst3.FullName)"
 
-      # ── 6. Copy VST3 to staging folder ───────────────────────────────────
+      # ── 7. Validate VST3 host compatibility with pluginval ─────────────────
+      - name: Validate VST3 with pluginval
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip" -OutFile "pluginval_Windows.zip"
+          Expand-Archive -Path "pluginval_Windows.zip" -DestinationPath "pluginval_bin" -Force
+          & "pluginval_bin\pluginval.exe" --headless --validate-in-process --strictness-level 5 --validate "$Env:VST3_PATH"
+
+      # ── 8. Copy VST3 to staging folder ───────────────────────────────────
       - name: Stage VST3
         shell: pwsh
         run: |
@@ -51,18 +66,18 @@ jobs:
           Copy-Item -Recurse -Force "$Env:VST3_PATH" -Destination installer\staging\
           Get-ChildItem -Recurse installer\staging
 
-      # ── 7. Install Inno Setup ─────────────────────────────────────────────
+      # ── 9. Install Inno Setup ─────────────────────────────────────────────
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
-      # ── 8. Compile Inno Setup installer ───────────────────────────────────
+      # ── 10. Compile Inno Setup installer ──────────────────────────────────
       - name: Build installer
         shell: cmd
         run: |
           "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AllyBass-Windows.iss
 
-      # ── 9. Upload installer as artifact ──────────────────────────────────
+      # ── 11. Upload installer as artifact ─────────────────────────────────
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -70,7 +85,7 @@ jobs:
           path: installer\Output\AllyBass_Setup.exe
           retention-days: 30
 
-      # ── 10. Attach to GitHub Release (only on tag push) ───────────────────
+      # ── 12. Attach to GitHub Release (only on tag push) ──────────────────
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

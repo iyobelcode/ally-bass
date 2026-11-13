@@ -21,7 +21,7 @@ AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
 AppUpdatesURL={#AppURL}
-DefaultDirName={commonpf64}\Common Files\VST3
+DefaultDirName={commoncf64}\VST3
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 ; Output
@@ -32,13 +32,11 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 ; Appearance
 WizardStyle=modern
-WizardImageFile=compiler:WizModernImage.bmp
-WizardSmallImageFile=compiler:WizModernSmallImage.bmp
 SetupIconFile=
 ; Min Windows 10
 MinVersion=10.0
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 ; Privileges
 PrivilegesRequired=admin
 ; Uninstaller
@@ -59,7 +57,11 @@ WelcomeLabel2=ALLY - 1300 SUB SYNTH is een grensverleggende VST3 Bassline Synthe
 ; ── Files ─────────────────────────────────────────────────────────────────
 [Files]
 ; The VST3 bundle (a directory on Windows) → installs to Common Files\VST3\
-Source: "{#VST3Dir}\*"; DestDir: "{commonpf64}\Common Files\VST3\ALLY - 1300 SUB SYNTH.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#VST3Dir}\*"; DestDir: "{app}\ALLY - 1300 SUB SYNTH.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; ── Cleanup on Uninstall ──────────────────────────────────────────────────
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\ALLY - 1300 SUB SYNTH.vst3"
 
 ; ── Registry ──────────────────────────────────────────────────────────────
 [Registry]
