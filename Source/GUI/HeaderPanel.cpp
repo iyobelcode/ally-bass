@@ -968,8 +968,8 @@ void HeaderPanel::drawAlmereMapMotif(juce::Graphics& g) const
         fineBlocks.lineTo(mPt(u + 0.05f, 0.68f));
     }
 
-    g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(0.46f));
-    g.strokePath(fineBlocks, juce::PathStrokeType(0.60f));
+    g.setColour(EngineeredDepthTheme::Colors::stroke.withAlpha(0.40f));
+    g.strokePath(fineBlocks, juce::PathStrokeType(0.55f));
 
     // 3. Tier-2 Distributor Parkways & Streets
     juce::Path avenues;
@@ -1034,13 +1034,13 @@ void HeaderPanel::drawAlmereMapMotif(juce::Graphics& g) const
 
     const auto coastGlowCenter = mPt(0.52f, 0.60f);
     const auto deepBayCorner   = mPt(0.84f, 1.02f);
-    juce::ColourGradient waterGlow(EngineeredDepthTheme::Colors::cyan.withAlpha(0.34f),
+    juce::ColourGradient waterGlow(EngineeredDepthTheme::Colors::cyan.withAlpha(0.38f),
                                    coastGlowCenter.x, coastGlowCenter.y,
-                                   juce::Colour(0xff02090e).withAlpha(0.96f),
+                                   juce::Colour(0xff01080e).withAlpha(0.98f),
                                    deepBayCorner.x, deepBayCorner.y,
                                    false);
-    waterGlow.addColour(0.32, EngineeredDepthTheme::Colors::cyan.withAlpha(0.14f));
-    waterGlow.addColour(0.70, juce::Colour(0xff04121b).withAlpha(0.90f));
+    waterGlow.addColour(0.28, EngineeredDepthTheme::Colors::cyan.withAlpha(0.18f));
+    waterGlow.addColour(0.68, juce::Colour(0xff031119).withAlpha(0.92f));
     g.setGradientFill(waterGlow);
     g.fillPath(weerwater);
 
@@ -1055,16 +1055,16 @@ void HeaderPanel::drawAlmereMapMotif(juce::Graphics& g) const
             const auto tx = juce::AffineTransform::translation(-lakeCx.x, -lakeCx.y)
                                 .scaled(s, s)
                                 .translated(lakeCx.x, lakeCx.y);
-            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.20f - static_cast<float>(ring) * 0.045f));
-            g.strokePath(weerwater, juce::PathStrokeType(0.75f), tx);
+            g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.24f - static_cast<float>(ring) * 0.055f));
+            g.strokePath(weerwater, juce::PathStrokeType(0.80f), tx);
         }
     }
 
     // Glowing Weerwater shoreline contour
-    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.28f));
-    g.strokePath(weerwater, juce::PathStrokeType(2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.82f));
-    g.strokePath(weerwater, juce::PathStrokeType(1.05f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour(EngineeredDepthTheme::Colors::cyan.withAlpha(0.32f));
+    g.strokePath(weerwater, juce::PathStrokeType(2.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour(EngineeredDepthTheme::Colors::cyanBright.withAlpha(0.88f));
+    g.strokePath(weerwater, juce::PathStrokeType(1.10f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     // Soft vignette + glass overhang shadow along left/right slanted seams
     juce::ColourGradient leftFade(EngineeredDepthTheme::Colors::bg.withAlpha(0.72f), xL, yT,

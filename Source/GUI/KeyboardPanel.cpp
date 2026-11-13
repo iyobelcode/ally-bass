@@ -153,33 +153,33 @@ void EngineeredDepthKeyboard::drawWhiteNote(int midiNoteNumber,
     const auto frontRect = keyRect.withTop(keyRect.getBottom() - frontH);
 
     // 2. Sculpted cool steel-grey / pale slate key face matching Engineered Depth master
-    juce::Colour topCol = juce::Colour(0xff263b47);
-    juce::Colour midCol = juce::Colour(0xff425c6b);
-    juce::Colour botCol = juce::Colour(0xff567282);
+    juce::Colour topCol = juce::Colour(0xff7d9bb0);
+    juce::Colour midCol = juce::Colour(0xff98b5c7);
+    juce::Colour botCol = juce::Colour(0xffb5cddc);
 
     if (isDown)
     {
-        topCol = juce::Colour(0xff0a3e4d);
-        midCol = juce::Colour(0xff0c7488);
-        botCol = juce::Colour(0xff10b9cc);
+        topCol = juce::Colour(0xff0a5063);
+        midCol = juce::Colour(0xff0e88a0);
+        botCol = juce::Colour(0xff1ae0f7);
     }
     else if (isOver)
     {
-        topCol = topCol.interpolatedWith(EngineeredDepthTheme::Colors::cyan, 0.10f);
-        midCol = midCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.14f);
+        topCol = topCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.12f);
+        midCol = midCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.15f);
         botCol = botCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.18f);
     }
 
     juce::ColourGradient faceGrad(topCol, faceRect.getCentreX(), faceRect.getY(),
                                   botCol, faceRect.getCentreX(), faceRect.getBottom(), false);
-    faceGrad.addColour(0.26, midCol);
-    faceGrad.addColour(0.84, isDown ? juce::Colour(0xff28dcf0) : juce::Colour(0xff5e7b8b));
+    faceGrad.addColour(0.30, midCol);
+    faceGrad.addColour(0.86, isDown ? juce::Colour(0xff3eeeff) : juce::Colour(0xffc2d8e4));
     g.setGradientFill(faceGrad);
     g.fillRect(faceRect);
 
     // Subtle dark overhang shadow directly under top chassis bezel
     const float pocketShadowH = juce::jlimit(2.5f, 5.2f, faceRect.getHeight() * 0.088f);
-    juce::ColourGradient topPocketGrad(juce::Colour(0xc802060a), faceRect.getCentreX(), faceRect.getY(),
+    juce::ColourGradient topPocketGrad(juce::Colour(0xd002060a), faceRect.getCentreX(), faceRect.getY(),
                                        juce::Colours::transparentBlack, faceRect.getCentreX(), faceRect.getY() + pocketShadowH,
                                        false);
     g.setGradientFill(topPocketGrad);
@@ -187,27 +187,27 @@ void EngineeredDepthKeyboard::drawWhiteNote(int midiNoteNumber,
 
     // Crisp tight left & right dark key side walls (architectural seam, no wide dark smear)
     const float sideBevelW = juce::jlimit(0.9f, 1.35f, keyRect.getWidth() * 0.042f);
-    g.setColour(juce::Colour(isDown ? 0x9004222c : 0xc0060f16));
+    g.setColour(juce::Colour(isDown ? 0x9004222c : 0xc0081620));
     g.fillRect(faceRect.withWidth(sideBevelW));
-    g.setColour(juce::Colour(isDown ? 0xa0041c24 : 0xd8040a0f));
+    g.setColour(juce::Colour(isDown ? 0xa0041c24 : 0xd8050e15));
     g.fillRect(faceRect.withLeft(faceRect.getRight() - sideBevelW * 1.15f));
 
     // Fine bright bevel edge catch right inside the left side groove + horizontal key ridge
-    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : juce::Colour(0xff9bb6c4))
-                    .withAlpha(isDown ? 0.55f : 0.24f));
+    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : juce::Colour(0xffd5e7f0))
+                    .withAlpha(isDown ? 0.70f : 0.40f));
     g.drawLine(faceRect.getX() + 0.9f, faceRect.getY() + 3.0f,
                faceRect.getX() + 0.9f, faceRect.getBottom() - 1.0f, 0.85f);
 
-    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : juce::Colour(0xff89a7b8))
-                    .withAlpha(isDown ? 0.90f : 0.48f));
-    g.fillRect(faceRect.getX(), faceRect.getBottom() - 1.05f, faceRect.getWidth(), 1.05f);
+    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : juce::Colour(0xffe2eef5))
+                    .withAlpha(isDown ? 0.90f : 0.65f));
+    g.fillRect(faceRect.getX(), faceRect.getBottom() - 1.15f, faceRect.getWidth(), 1.15f);
 
     // 3. Dark 3D front drop face at bottom of white key
     {
         juce::ColourGradient frontGrad(
-            isDown ? juce::Colour(0xff0095a8) : juce::Colour(0xff13242e),
+            isDown ? juce::Colour(0xff0095a8) : juce::Colour(0xff223a47),
             frontRect.getCentreX(), frontRect.getY(),
-            isDown ? juce::Colour(0xff004452) : juce::Colour(0xff040a0e),
+            isDown ? juce::Colour(0xff004452) : juce::Colour(0xff08131a),
             frontRect.getCentreX(), frontRect.getBottom(),
             false);
         g.setGradientFill(frontGrad);
@@ -244,12 +244,9 @@ void EngineeredDepthKeyboard::drawWhiteNote(int midiNoteNumber,
                                        .withTop(faceRect.getBottom() - 14.0f)
                                        .withBottom(faceRect.getBottom() - 1.5f);
 
-        g.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.80f));
-        g.drawText(noteText, labelArea.translated(0.6f, 0.8f), juce::Justification::centredLeft, false);
-
-        g.setColour(isDown ? EngineeredDepthTheme::Colors::cyanBright
-                           : juce::Colour(0xffdce9f0).withAlpha(0.92f));
-        g.drawText(noteText, labelArea, juce::Justification::centredLeft, false);
+        // Crisp dark slate embossed lettering
+        g.setColour(isDown ? juce::Colour(0xff02141c) : juce::Colour(0xff122633).withAlpha(0.90f));
+        g.drawText(noteText, labelArea.translated(0.0f, 0.2f), juce::Justification::centredLeft, false);
     }
 }
 
@@ -280,26 +277,26 @@ void EngineeredDepthKeyboard::drawBlackNote(int,
     const float frontH = juce::jlimit(3.0f, 5.2f, capOuter.getHeight() * 0.145f);
     const auto topPlane = capOuter.withTrimmedBottom(frontH * 0.72f);
 
-    // 2. Sculpted brushed-titanium sharp/flat keycap (cool metallic silver brightening toward front bevel)
-    juce::Colour topCol = juce::Colour(0xff728998);
-    juce::Colour midCol = juce::Colour(0xff9bb4c4);
-    juce::Colour botCol = juce::Colour(0xffbfd3df);
+    // 2. Sculpted tactile matte obsidian sharp/flat keycap
+    juce::Colour topCol = juce::Colour(0xff12232c);
+    juce::Colour midCol = juce::Colour(0xff182e3a);
+    juce::Colour botCol = juce::Colour(0xff223d4c);
 
     if (isDown)
     {
-        topCol = juce::Colour(0xff3eeeff);
-        midCol = EngineeredDepthTheme::Colors::cyan;
-        botCol = juce::Colour(0xff94fbff);
+        topCol = juce::Colour(0xff004c59);
+        midCol = EngineeredDepthTheme::Colors::cyan.darker(0.25f);
+        botCol = juce::Colour(0xff009db3);
     }
     else if (isOver)
     {
-        topCol = topCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.25f);
-        midCol = midCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.28f);
-        botCol = botCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.30f);
+        topCol = topCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.16f);
+        midCol = midCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.20f);
+        botCol = botCol.interpolatedWith(EngineeredDepthTheme::Colors::cyanBright, 0.22f);
     }
 
-    // Dark side/front keycap block base
-    g.setColour(isDown ? juce::Colour(0xff004c59) : juce::Colour(0xff0d1b24));
+    // Deep dark side/front keycap block base
+    g.setColour(isDown ? juce::Colour(0xff00343e) : juce::Colour(0xff061016));
     g.fillRoundedRectangle(capOuter, capRadius);
 
     juce::ColourGradient capGrad(topCol, topPlane.getCentreX(), topPlane.getY(),
@@ -308,20 +305,20 @@ void EngineeredDepthKeyboard::drawBlackNote(int,
     g.setGradientFill(capGrad);
     g.fillRoundedRectangle(topPlane, capRadius);
 
-    // Subtle dark vertical side walls along the titanium cap
+    // Subtle dark vertical side walls along the matte keycap
     const float wallW = juce::jlimit(1.0f, 1.8f, topPlane.getWidth() * 0.10f);
-    g.setColour(juce::Colour(isDown ? 0x6500343e : 0xa5061017));
+    g.setColour(juce::Colour(isDown ? 0x6500343e : 0xb503080c));
     g.fillRect(topPlane.getX(), topPlane.getY() + 1.0f, wallW, topPlane.getHeight() - 2.0f);
     g.fillRect(topPlane.getRight() - wallW, topPlane.getY() + 1.0f, wallW, topPlane.getHeight() - 2.0f);
 
     // Crisp horizontal top specular rim + sharp lower bevel ridge separating top plane from front block
-    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : juce::Colour(0xffd7e8f2))
-                    .withAlpha(isDown ? 0.90f : 0.44f));
+    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : juce::Colour(0xff5a869e))
+                    .withAlpha(isDown ? 0.90f : 0.45f));
     g.drawLine(topPlane.getX() + 1.4f, topPlane.getBottom() - 0.8f,
                topPlane.getRight() - 1.4f, topPlane.getBottom() - 0.8f, 0.95f);
 
-    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : EngineeredDepthTheme::Colors::textPrimary)
-                    .withAlpha(isDown ? 0.85f : 0.28f));
+    g.setColour((isDown ? EngineeredDepthTheme::Colors::cyanBright : juce::Colour(0xff86b5ce))
+                    .withAlpha(isDown ? 0.85f : 0.38f));
     g.drawLine(topPlane.getX() + 1.4f, topPlane.getY() + 0.8f,
                topPlane.getRight() - 1.4f, topPlane.getY() + 0.8f, 0.85f);
 

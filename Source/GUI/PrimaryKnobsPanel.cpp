@@ -382,7 +382,7 @@ void PrimaryKnobsPanel::renderDynamicHavenGlow(juce::Graphics& g, float dirtLeve
     const auto& havenSlot = slotBounds[2];
     const auto havenCentre = havenSlot.getCentre().toFloat();
     const float spillR = static_cast<float>(havenSlot.getWidth()) * 0.72f;
-    const float redAlpha = 0.06f + 0.11f * dirtLevel;
+    const float redAlpha = 0.08f + 0.16f * dirtLevel;
 
     juce::ColourGradient redSpill(EngineeredDepthTheme::Colors::red.withAlpha(redAlpha),
                                   havenCentre.x - spillR * 0.18f, havenCentre.y + 4.0f,

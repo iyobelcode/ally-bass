@@ -109,12 +109,12 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
         cg.addTransform(juce::AffineTransform::translation(static_cast<float>(-x), static_cast<float>(-y)).scaled(scale));
 
         const auto wellBounds = juce::Rectangle<float>(centre.x - rWell, centre.y - rWell, rWell * 2.0f, rWell * 2.0f);
-        cg.setColour(EngineeredDepthTheme::Colors::dialWell);
+        cg.setColour(isRedAccent ? juce::Colour(0xff0d0507) : EngineeredDepthTheme::Colors::dialWell);
         cg.fillEllipse(wellBounds);
 
         cg.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.90f));
         cg.drawEllipse(wellBounds, juce::jmax(0.9f, (isCompact ? 0.015f : 0.006f) * diameter));
-        cg.setColour(EngineeredDepthTheme::Colors::strokeSubtle.withAlpha(0.45f));
+        cg.setColour((isRedAccent ? juce::Colour(0xff3d161d) : EngineeredDepthTheme::Colors::strokeSubtle).withAlpha(0.45f));
         cg.drawEllipse(wellBounds.reduced(0.5f), juce::jmax(0.75f, (isCompact ? 0.012f : 0.004f) * diameter));
 
         cachedTrackPath.clear();
@@ -204,7 +204,7 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
     }
 
     // 3. Recessed circular inactive track groove
-    g.setColour(palette.trackInactive);
+    g.setColour(isRedAccent ? juce::Colour(0xff240a10) : palette.trackInactive);
     g.strokePath(cachedTrackPath,
                  juce::PathStrokeType(arcStroke * 0.90f,
                                       juce::PathStrokeType::curved,
@@ -278,9 +278,9 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
 
             juce::ColourGradient bevelGrad(
                 steelTop,
-                centre.x, centre.y - rMetalOuter,
+                centre.x - rMetalOuter * 0.50f, centre.y - rMetalOuter * 0.75f,
                 juce::Colour(0xff040c11),
-                centre.x, centre.y + rMetalOuter * 0.94f,
+                centre.x + rMetalOuter * 0.60f, centre.y + rMetalOuter * 0.75f,
                 false);
             bevelGrad.addColour(0.24, midShoulder);
             bevelGrad.addColour(0.54, juce::Colour(0xff0b1922));
@@ -338,7 +338,7 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
 
             juce::Path topSoftSpec;
             topSoftSpec.addCentredArc(centre.x, centre.y, rMetalOuter - rimStroke * 1.15f, rMetalOuter - rimStroke * 1.15f,
-                                      0.0f, -1.32f, 1.32f, true);
+                                      0.0f, -2.40f, 0.68f, true);
             const auto rimSpecCol = (isRedAccent && state.enabled)
                 ? juce::Colour(0xff9fc6db).interpolatedWith(juce::Colour(0xffff5060), 0.16f)
                 : juce::Colour(0xff9fc6db);
@@ -347,7 +347,7 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
 
             juce::Path topSpec;
             topSpec.addCentredArc(centre.x, centre.y, rMetalOuter - rimStroke * 0.55f, rMetalOuter - rimStroke * 0.55f,
-                                  0.0f, -1.16f, 1.16f, true);
+                                  0.0f, -2.25f, 0.52f, true);
             gBody.setColour(rimSpecCol.interpolatedWith(EngineeredDepthTheme::Colors::textPrimary, 0.35f)
                                 .withAlpha(state.hovered ? 0.78f : 0.64f));
             gBody.strokePath(topSpec, juce::PathStrokeType(rimStroke * 1.05f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
@@ -390,14 +390,31 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
 
             juce::ColourGradient dishGrad(
                 dishTopCol,
-                centre.x, centre.y - rDishOuter * 0.85f,
+                centre.x - rDishOuter * 0.50f, centre.y - rDishOuter * 0.70f,
                 juce::Colour(0xff030c12),
-                centre.x, centre.y + rDishOuter * 0.92f,
+                centre.x + rDishOuter * 0.50f, centre.y + rDishOuter * 0.75f,
                 false);
-            dishGrad.addColour(0.40, isRedAccent ? juce::Colour(0xff10191f) : EngineeredDepthTheme::Colors::dialFaceMid);
-            dishGrad.addColour(0.78, juce::Colour(0xff06131c));
+            dishGrad.addColour(0.38, isRedAccent ? juce::Colour(0xff10191f) : EngineeredDepthTheme::Colors::dialFaceMid);
+            dishGrad.addColour(0.76, juce::Colour(0xff06131c));
             gBody.setGradientFill(dishGrad);
             gBody.fillEllipse(dishBounds);
+
+            // Ambient occlusion shadow along upper-left inner rim
+            {
+                juce::Graphics::ScopedSaveState clipDish(gBody);
+                juce::Path dp;
+                dp.addEllipse(dishBounds);
+                gBody.reduceClipRegion(dp);
+
+                juce::ColourGradient innerAo(
+                    juce::Colour(0xb0010406),
+                    centre.x - rDishOuter * 0.85f, centre.y - rDishOuter * 0.85f,
+                    juce::Colours::transparentBlack,
+                    centre.x - rDishOuter * 0.20f, centre.y - rDishOuter * 0.20f,
+                    false);
+                gBody.setGradientFill(innerAo);
+                gBody.fillRect(dishBounds);
+            }
 
             if (isRedAccent && state.active && state.enabled && !isCompact)
             {
@@ -420,7 +437,7 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
             const float dishStrokeAlpha = isCompact ? (state.hovered ? 0.22f : 0.12f) : (state.hovered ? 0.34f : 0.20f);
             juce::Path dishTopArc;
             dishTopArc.addCentredArc(centre.x, centre.y, rDishOuter - 0.6f, rDishOuter - 0.6f,
-                                     0.0f, -1.10f, 1.10f, true);
+                                     0.0f, -2.20f, 0.60f, true);
             gBody.setColour((isRedAccent ? juce::Colour(0xff8e6873) : EngineeredDepthTheme::Colors::metalRimLight).withAlpha(dishStrokeAlpha));
             gBody.strokePath(dishTopArc, juce::PathStrokeType(juce::jmax(0.75f, 0.005f * diameter)));
 
@@ -431,20 +448,29 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
                                                           centre.y - rCapInner,
                                                           rCapInner * 2.0f,
                                                           rCapInner * 2.0f);
-            gBody.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.72f));
-            gBody.drawEllipse(capBounds.expanded(0.8f), juce::jmax(0.9f, 0.007f * diameter));
+            // Outer stepped shadow ring
+            gBody.setColour(EngineeredDepthTheme::Colors::black.withAlpha(0.85f));
+            gBody.drawEllipse(capBounds.expanded(0.9f), juce::jmax(1.0f, 0.008f * diameter));
 
-            const auto capTop = isRedAccent ? juce::Colour(0xff182228) : juce::Colour(0xff0f212c);
+            // Raised machined cap fill
+            const auto capTop = isRedAccent ? juce::Colour(0xff182228) : juce::Colour(0xff122633);
             const auto capBot = isRedAccent ? juce::Colour(0xff070e12) : juce::Colour(0xff040e15);
             juce::ColourGradient capGrad(capTop,
-                                         centre.x, centre.y - rCapInner,
+                                         centre.x - rCapInner * 0.45f, centre.y - rCapInner * 0.65f,
                                          capBot,
-                                         centre.x, centre.y + rCapInner,
+                                         centre.x + rCapInner * 0.45f, centre.y + rCapInner * 0.75f,
                                          false);
+            capGrad.addColour(0.45, isRedAccent ? juce::Colour(0xff101a20) : juce::Colour(0xff0a1b24));
             gBody.setGradientFill(capGrad);
             gBody.fillEllipse(capBounds);
 
+            // Fine top-left bevel catch on cap rim
             const float capStrokeAlpha = isCompact ? (state.hovered ? 0.24f : 0.14f) : (state.hovered ? 0.42f : 0.24f);
+            juce::Path capTopBevel;
+            capTopBevel.addCentredArc(centre.x, centre.y, rCapInner - 0.5f, rCapInner - 0.5f, 0.0f, -2.40f, 0.45f, true);
+            gBody.setColour((isRedAccent ? juce::Colour(0xff7a8c98) : juce::Colour(0xff52788e)).withAlpha(capStrokeAlpha * 1.35f));
+            gBody.strokePath(capTopBevel, juce::PathStrokeType(juce::jmax(0.85f, 0.0055f * diameter)));
+
             gBody.setColour((isRedAccent ? juce::Colour(0xff42525c) : EngineeredDepthTheme::Colors::stroke).withAlpha(capStrokeAlpha));
             gBody.drawEllipse(capBounds, juce::jmax(0.75f, 0.0045f * diameter));
         }
@@ -532,7 +558,8 @@ void DepthRingLookAndFeel::drawRotarySlider(juce::Graphics& g,
                                         coreW,
                                         juce::jmax(1.0f, pointerLen - 1.0f),
                                         coreW * 0.45f);
-            g.setColour(palette.coreHighlight.withAlpha(state.dragging ? 0.92f : 0.78f));
+            const auto coreCol = isRedAccent ? juce::Colour(0xffff8090) : palette.coreHighlight;
+            g.setColour(coreCol.withAlpha(state.dragging ? 0.92f : 0.78f));
             g.fillPath(coreBar, transform);
         }
     }
