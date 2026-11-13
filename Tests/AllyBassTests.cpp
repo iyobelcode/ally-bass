@@ -4306,7 +4306,7 @@ public:
 
         beginTest("Multi-SR and Multi-BS: Audio decay at max release (3000 ms) settles to bit-zero within reported tail");
         {
-            for (double sr : { 44100.0, 48000.0, 96000.0 })
+            for (double sr : { 44100.0, 48000.0, 96000.0, 192000.0 })
             {
                 for (int bs : { 64, 512, 1024 })
                 {
