@@ -4445,7 +4445,311 @@ public:
     }
 };
 
+class LegacyStateMigrationTests final : public juce::UnitTest
+{
+public:
+    LegacyStateMigrationTests() : juce::UnitTest("ALLY1300 Legacy State & Preset Migration (E.3C.1)", "AllyBass") {}
+
+    void runTest() override
+    {
+        auto buildStateXml = [](const juce::String& glideId, const juce::var& glideVal, bool includeModern = false, float modernVal = 120.0f) {
+            auto root = std::make_unique<juce::XmlElement>("Parameters");
+            root->setAttribute("allyPresetKind", 0);
+            root->setAttribute("allyPresetIndex", -1);
+            root->setAttribute("allyPresetName", "LegacyTest");
+            root->setAttribute("allyPresetPath", "");
+            root->setAttribute("allyPresetModified", 1);
+
+            auto addParam = [&](const juce::String& id, const juce::var& val) {
+                auto* p = root->createNewChildElement("PARAM");
+                p->setAttribute("id", id);
+                if (!val.isVoid())
+                    p->setAttribute("value", val.toString());
+            };
+
+            addParam("diepte", 0.72f);
+            addParam("polderPunch", 0.45f);
+            addParam("havenDirt", 0.33f);
+            addParam("masterVolume", -2.5f);
+            addParam("attack", 15.0f);
+            addParam("release", 450.0f);
+            addParam("stadsdeel", 2.0f); // Poort
+            addParam("overdrive036", 1.0f);
+            addParam("monoLock1300", 0.0f);
+
+            if (includeModern)
+                addParam("waterwijkGlide", modernVal);
+
+            if (glideId.isNotEmpty())
+                addParam(glideId, glideVal);
+
+            return root;
+        };
+
+        beginTest("1. Legacy-state with weerwaterGlide = 250 ms restores accurately and preserves other parameters");
+        {
+            auto xml = buildStateXml("weerwaterGlide", 250.0f);
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary(*xml, block);
+
+            AllyBassAudioProcessor proc;
+            proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 250.0f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("diepte")->load(), 0.72f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("polderPunch")->load(), 0.45f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("havenDirt")->load(), 0.33f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("masterVolume")->load(), -2.5f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("attack")->load(), 15.0f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("release")->load(), 450.0f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("stadsdeel")->load(), 2.0f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("overdrive036")->load(), 1.0f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("monoLock1300")->load(), 0.0f, 0.01f);
+        }
+
+        beginTest("2. Legacy-state with weerwaterGlide = 0 ms (boundary minimum)");
+        {
+            auto xml = buildStateXml("weerwaterGlide", 0.0f);
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary(*xml, block);
+
+            AllyBassAudioProcessor proc;
+            proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 0.0f, 0.01f);
+        }
+
+        beginTest("3. Legacy-state with weerwaterGlide = 500 ms (boundary maximum)");
+        {
+            auto xml = buildStateXml("weerwaterGlide", 500.0f);
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary(*xml, block);
+
+            AllyBassAudioProcessor proc;
+            proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 500.0f, 0.01f);
+        }
+
+        beginTest("4. Modern state with exclusively waterwijkGlide is unchanged");
+        {
+            auto xml = buildStateXml("waterwijkGlide", 175.5f);
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary(*xml, block);
+
+            AllyBassAudioProcessor proc;
+            proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 175.5f, 0.01f);
+        }
+
+        beginTest("5. Dual-ID state: modern waterwijkGlide takes strict precedence over legacy weerwaterGlide");
+        {
+            // Both IDs present: modern = 85.0 ms, legacy = 350.0 ms
+            auto xml = buildStateXml("weerwaterGlide", 350.0f, true, 85.0f);
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary(*xml, block);
+
+            AllyBassAudioProcessor proc;
+            proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 85.0f, 0.01f);
+        }
+
+        beginTest("6. Invalid, missing, and out-of-range legacy values");
+        {
+            // Non-numeric string -> fallback to default 40.0 ms
+            {
+                auto xml = buildStateXml("weerwaterGlide", "corrupt_string");
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary(*xml, block);
+                AllyBassAudioProcessor proc;
+                proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+                expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 40.0f, 0.01f);
+            }
+            // Missing value attribute -> fallback to default 40.0 ms
+            {
+                auto xml = buildStateXml("weerwaterGlide", juce::var());
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary(*xml, block);
+                AllyBassAudioProcessor proc;
+                proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+                expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 40.0f, 0.01f);
+            }
+            // Out of range negative (-100.0) -> clamped to 0.0 ms
+            {
+                auto xml = buildStateXml("weerwaterGlide", -100.0f);
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary(*xml, block);
+                AllyBassAudioProcessor proc;
+                proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+                expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 0.0f, 0.01f);
+            }
+            // Out of range high (850.0) -> clamped to 500.0 ms
+            {
+                auto xml = buildStateXml("weerwaterGlide", 850.0f);
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary(*xml, block);
+                AllyBassAudioProcessor proc;
+                proc.setStateInformation(block.getData(), static_cast<int>(block.getSize()));
+                expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 500.0f, 0.01f);
+            }
+        }
+
+        beginTest("7. Legacy .allypreset file import");
+        {
+            const auto tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                    .getChildFile("AllyLegacyPresetTest_" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
+            tempDir.createDirectory();
+
+            auto presetXml = std::make_unique<juce::XmlElement>("ALLY1300Preset");
+            presetXml->setAttribute("schemaVersion", 1);
+            presetXml->setAttribute("pluginVersion", "1.0.0");
+            auto* meta = presetXml->createNewChildElement("Meta");
+            meta->setAttribute("name", "Legacy_Sub_Drill");
+
+            auto* params = presetXml->createNewChildElement("Parameters");
+            auto addParam = [&](const juce::String& id, float val) {
+                auto* p = params->createNewChildElement("PARAM");
+                p->setAttribute("id", id);
+                p->setAttribute("value", val);
+            };
+            addParam("diepte", 0.65f);
+            addParam("polderPunch", 0.20f);
+            addParam("havenDirt", 0.40f);
+            addParam("weerwaterGlide", 165.0f); // legacy ID in preset
+            addParam("masterVolume", 0.0f);
+            addParam("attack", 5.0f);
+            addParam("release", 350.0f);
+            addParam("stadsdeel", 1.0f);
+            addParam("overdrive036", 0.0f);
+            addParam("monoLock1300", 1.0f);
+
+            const auto presetFile = tempDir.getChildFile("Legacy_Sub_Drill.allypreset");
+            presetFile.replaceWithText(presetXml->toString());
+
+            AllyBassAudioProcessor proc;
+            juce::String err;
+            expect(proc.loadUserPresetFromFile(presetFile, err), "Legacy .allypreset must load successfully: " + err);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 165.0f, 0.01f);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("diepte")->load(), 0.65f, 0.01f);
+
+            tempDir.deleteRecursively();
+        }
+
+        beginTest("8. Modern .allypreset file import");
+        {
+            const auto tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                    .getChildFile("AllyModernPresetTest_" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
+            tempDir.createDirectory();
+
+            auto presetXml = std::make_unique<juce::XmlElement>("ALLY1300Preset");
+            presetXml->setAttribute("schemaVersion", 1);
+            presetXml->setAttribute("pluginVersion", "1.0.0");
+            auto* meta = presetXml->createNewChildElement("Meta");
+            meta->setAttribute("name", "Modern_Sub");
+
+            auto* params = presetXml->createNewChildElement("Parameters");
+            auto addParam = [&](const juce::String& id, float val) {
+                auto* p = params->createNewChildElement("PARAM");
+                p->setAttribute("id", id);
+                p->setAttribute("value", val);
+            };
+            addParam("diepte", 0.80f);
+            addParam("polderPunch", 0.10f);
+            addParam("havenDirt", 0.25f);
+            addParam("waterwijkGlide", 95.0f); // modern ID
+            addParam("masterVolume", -1.0f);
+            addParam("attack", 10.0f);
+            addParam("release", 600.0f);
+            addParam("stadsdeel", 0.0f);
+            addParam("overdrive036", 1.0f);
+            addParam("monoLock1300", 1.0f);
+
+            const auto presetFile = tempDir.getChildFile("Modern_Sub.allypreset");
+            presetFile.replaceWithText(presetXml->toString());
+
+            AllyBassAudioProcessor proc;
+            juce::String err;
+            expect(proc.loadUserPresetFromFile(presetFile, err), "Modern .allypreset must load successfully: " + err);
+            expectWithinAbsoluteError(proc.apvts.getRawParameterValue("waterwijkGlide")->load(), 95.0f, 0.01f);
+
+            tempDir.deleteRecursively();
+        }
+
+        beginTest("9. Save and restore roundtrip never writes legacy weerwaterGlide");
+        {
+            AllyBassAudioProcessor proc1;
+            if (auto* p = proc1.apvts.getParameter("waterwijkGlide"))
+                p->setValueNotifyingHost(p->convertTo0to1(210.0f));
+
+            juce::MemoryBlock savedBlock;
+            proc1.getStateInformation(savedBlock);
+
+            auto savedXml = juce::AudioProcessor::getXmlFromBinary(savedBlock.getData(), static_cast<int>(savedBlock.getSize()));
+            expect(savedXml != nullptr, "Saved state must be valid XML");
+            if (savedXml != nullptr)
+            {
+                const juce::String str = savedXml->toString();
+                expect(str.contains("waterwijkGlide"), "Saved state must contain modern waterwijkGlide");
+                expect(!str.contains("weerwaterGlide"), "Saved state must NEVER contain legacy weerwaterGlide");
+            }
+
+            AllyBassAudioProcessor proc2;
+            proc2.setStateInformation(savedBlock.getData(), static_cast<int>(savedBlock.getSize()));
+            expectWithinAbsoluteError(proc2.apvts.getRawParameterValue("waterwijkGlide")->load(), 210.0f, 0.01f);
+        }
+
+        beginTest("10. All 14 factory presets remain consistent");
+        {
+            AllyBassAudioProcessor proc;
+            for (int i = 0; i < proc.getNumPrograms(); ++i)
+            {
+                proc.setCurrentProgram(i);
+                const float glideVal = proc.apvts.getRawParameterValue("waterwijkGlide")->load();
+                expect(glideVal >= 0.0f && glideVal <= 500.0f, "Preset glide value must be within [0, 500] ms");
+            }
+        }
+
+        beginTest("11. DSP audio bit-identity between migrated legacy state and direct configuration");
+        {
+            // Instance A: loaded from legacy XML with weerwaterGlide = 85.0 ms
+            auto legacyXml = buildStateXml("weerwaterGlide", 85.0f);
+            juce::MemoryBlock legacyBlock;
+            juce::AudioProcessor::copyXmlToBinary(*legacyXml, legacyBlock);
+
+            AllyBassAudioProcessor procA;
+            procA.setStateInformation(legacyBlock.getData(), static_cast<int>(legacyBlock.getSize()));
+            procA.prepareToPlay(44100.0, 256);
+
+            // Instance B: loaded from modern XML with waterwijkGlide = 85.0 ms
+            auto modernXml = buildStateXml("waterwijkGlide", 85.0f);
+            juce::MemoryBlock modernBlock;
+            juce::AudioProcessor::copyXmlToBinary(*modernXml, modernBlock);
+
+            AllyBassAudioProcessor procB;
+            procB.setStateInformation(modernBlock.getData(), static_cast<int>(modernBlock.getSize()));
+            procB.prepareToPlay(44100.0, 256);
+
+            juce::AudioBuffer<float> bufA(2, 256);
+            juce::AudioBuffer<float> bufB(2, 256);
+            juce::MidiBuffer midi;
+            midi.addEvent(juce::MidiMessage::noteOn(1, 36, 0.9f), 0);
+
+            procA.processBlock(bufA, midi);
+            procB.processBlock(bufB, midi);
+
+            float maxDiff = 0.0f;
+            for (int ch = 0; ch < 2; ++ch)
+                for (int s = 0; s < 256; ++s)
+                    maxDiff = std::max(maxDiff, std::abs(bufA.getSample(ch, s) - bufB.getSample(ch, s)));
+
+            expectEquals(maxDiff, 0.0f, "DSP audio from legacy-migrated state must be bit-identical to modern state");
+
+            procA.releaseResources();
+            procB.releaseResources();
+        }
+    }
+};
+
 static HostTailContractTests hostTailContractTests;
+static LegacyStateMigrationTests legacyStateMigrationTests;
 static MidiSourceIsolationD1E1Tests midiSourceIsolationD1E1Tests;
 
 } // namespace

@@ -1140,6 +1140,8 @@ void AllyBassAudioProcessor::setStateInformation(const void* data, int sizeInByt
         if (!restoredTree.isValid())
             return;
 
+        AllyPresets::migrateLegacyStateTree(restoredTree);
+
         const bool hadMetadata = restoredTree.hasProperty(AllyPresets::propPresetKind);
         const auto info = hadMetadata
             ? AllyPresets::readPresetMetadata(restoredTree)

@@ -422,6 +422,77 @@ inline void applyPreset(juce::AudioProcessorValueTreeState& apvts, int presetInd
     apvts.state.setProperty(propPresetApplying, false, nullptr);
 }
 
+/**
+ * Migrates legacy parameter IDs (e.g. weerwaterGlide -> waterwijkGlide) in-place
+ * within an APVTS ValueTree state or preset tree before state application.
+ *
+ * Requirements:
+ * 1. weerwaterGlide is present.
+ * 2. waterwijkGlide is not already present.
+ * 3. The legacy value is valid and parseable as a finite number, clamped to [0.0, 500.0] ms.
+ *
+ * If both IDs exist, modern waterwijkGlide takes precedence and legacy weerwaterGlide is pruned.
+ * Idempotent: running on already migrated or modern trees produces no mutations.
+ */
+inline bool migrateLegacyStateTree(juce::ValueTree& stateTree)
+{
+    if (!stateTree.isValid())
+        return false;
+
+    juce::ValueTree modernNode;
+    juce::ValueTree legacyNode;
+
+    for (int i = 0; i < stateTree.getNumChildren(); ++i)
+    {
+        auto child = stateTree.getChild(i);
+        if (child.hasType("PARAM"))
+        {
+            const auto id = child.getProperty("id").toString();
+            if (id == "waterwijkGlide")
+                modernNode = child;
+            else if (id == "weerwaterGlide")
+                legacyNode = child;
+        }
+    }
+
+    // If both IDs exist, modern waterwijkGlide takes precedence; remove legacy node
+    if (modernNode.isValid() && legacyNode.isValid())
+    {
+        stateTree.removeChild(legacyNode, nullptr);
+        return true;
+    }
+
+    // Only migrate if legacy exists and modern does not
+    if (!modernNode.isValid() && legacyNode.isValid())
+    {
+        const juce::var rawVal = legacyNode.getProperty("value");
+        if (!rawVal.isVoid())
+        {
+            const juce::String strVal = rawVal.toString().trim();
+            if (strVal.isNotEmpty())
+            {
+                char* endPtr = nullptr;
+                const char* cstr = strVal.toRawUTF8();
+                const double parsed = std::strtod(cstr, &endPtr);
+
+                if (endPtr != cstr && *endPtr == '\0' && std::isfinite(parsed))
+                {
+                    const float clamped = juce::jlimit(0.0f, 500.0f, static_cast<float>(parsed));
+                    legacyNode.setProperty("id", "waterwijkGlide", nullptr);
+                    legacyNode.setProperty("value", clamped, nullptr);
+                    return true;
+                }
+            }
+        }
+
+        // Invalid or corrupt legacy value: prune so APVTS falls back cleanly to default (40.0 ms)
+        stateTree.removeChild(legacyNode, nullptr);
+        return true;
+    }
+
+    return false;
+}
+
 inline std::unique_ptr<juce::XmlElement> buildUserPresetXml(juce::AudioProcessorValueTreeState& apvts,
                                                             const juce::String& presetName,
                                                             const juce::File& targetFile = {},
@@ -557,6 +628,8 @@ inline bool loadPresetFromFile(juce::AudioProcessorValueTreeState& apvts,
         outError = "Preset-parameterstructuur is beschadigd.";
         return false;
     }
+
+    migrateLegacyStateTree(parsedTree);
 
     // Verify at least one genuine PARAM entry belongs to this plugin before mutating live state
     const auto& knownIds = getAllParameterIds();
