@@ -82,21 +82,13 @@ juce::Path EngineeredDepthIcons::buildStrokePath(IconId icon, juce::Rectangle<fl
             break;
 
         case IconId::StadsdeelDsp:
-            // Matches Phase 5 stadsdeel_dsp.svg skyline contour with closed base line
+            // "Vier stadsdelen": minimalistische geometrische 2x2 district-matrix
             outViewBox = { 0.0f, 0.0f, 24.0f, 24.0f };
-            path.startNewSubPath(2.0f, 20.0f);
-            path.lineTo(2.0f, 12.0f);
-            path.lineTo(7.0f, 12.0f);
-            path.lineTo(7.0f, 5.0f);
-            path.lineTo(11.0f, 5.0f);
-            path.lineTo(11.0f, 17.0f);
-            path.lineTo(14.0f, 17.0f);
-            path.lineTo(14.0f, 3.0f);
-            path.lineTo(19.0f, 3.0f);
-            path.lineTo(19.0f, 10.0f);
-            path.lineTo(22.0f, 10.0f);
-            path.lineTo(22.0f, 20.0f);
-            path.lineTo(2.0f, 20.0f);
+            // Vier kwadranten (Almere Haven, Centrum, Poort, Buiten)
+            path.addRoundedRectangle(2.0f, 2.0f, 8.5f, 8.5f, 1.5f);
+            path.addRoundedRectangle(13.5f, 2.0f, 8.5f, 8.5f, 1.5f);
+            path.addRoundedRectangle(2.0f, 13.5f, 8.5f, 8.5f, 1.5f);
+            path.addRoundedRectangle(13.5f, 13.5f, 8.5f, 8.5f, 1.5f);
             break;
 
         case IconId::ChevronDown:
@@ -329,14 +321,6 @@ void EngineeredDepthIcons::drawIcon(juce::Graphics& g,
 
     g.setColour(primaryColour);
     g.strokePath(path, stroke, viewTransform);
-
-    if (icon == IconId::StadsdeelDsp)
-    {
-        auto dotCentre = juce::Point<float>(12.0f, 20.0f).transformedBy(viewTransform);
-        const float dotR = juce::jmax(1.0f, strokeThickness * 0.95f);
-        g.setColour(secondaryColour);
-        g.fillEllipse(dotCentre.x - dotR, dotCentre.y - dotR, dotR * 2.0f, dotR * 2.0f);
-    }
 }
 
 } // namespace AllyGUI
