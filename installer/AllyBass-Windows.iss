@@ -59,10 +59,6 @@ WelcomeLabel2=ALLY - 1300 SUB SYNTH is een grensverleggende VST3 Bassline Synthe
 ; The VST3 bundle (a directory on Windows) → installs to Common Files\VST3\
 Source: "{#VST3Dir}\*"; DestDir: "{app}\ALLY - 1300 SUB SYNTH.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; ── Cleanup on Uninstall ──────────────────────────────────────────────────
-[UninstallDelete]
-Type: filesandordirs; Name: "{app}\ALLY - 1300 SUB SYNTH.vst3"
-
 ; ── Registry ──────────────────────────────────────────────────────────────
 [Registry]
 ; Nothing required – VST3 is discovered by path, not registry.
