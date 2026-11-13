@@ -62,9 +62,11 @@ jobs:
             throw "pluginval checksum mismatch! Expected: $expectedHash, Actual: $actualHash"
           }
           Expand-Archive -Path "pluginval_Windows.zip" -DestinationPath "pluginval_bin" -Force
-          & "pluginval_bin\pluginval.exe" --headless --validate-in-process --strictness-level 5 --validate "$Env:VST3_PATH"
-          if ($LASTEXITCODE -ne 0) {
-            throw "pluginval validation failed with exit code $LASTEXITCODE"
+          $valArgs = "--headless --validate-in-process --strictness-level 5 --validate `"$Env:VST3_PATH`""
+          $p = Start-Process -FilePath "pluginval_bin\pluginval.exe" -ArgumentList $valArgs -Wait -PassThru -NoNewWindow
+          Write-Output "pluginval finished with exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) {
+            throw "pluginval validation failed with exit code $($p.ExitCode)"
           }
 
       # ── 8. Copy VST3 to staging folder ───────────────────────────────────
